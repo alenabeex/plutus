@@ -34,3 +34,11 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# finance data — NEVER in git (lives at ~/FinanceTracker/, enforced here as backstop)
+*.db
+*.db-journal
+*.sqlite*
+.env*
+!.env.example
+seed.local.json

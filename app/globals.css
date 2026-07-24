@@ -127,3 +127,21 @@
     @apply font-sans;
     }
 }
+/* ============================================================
+   product-designer type scale (05_tools/skills/product-designer.md)
+   The only font sizes allowed. Weights: 400/600/700/800 only.
+   ============================================================ */
+@theme {
+  --text-display: 36px;  /* one hero number per view */
+  --text-num-lg: 24px;   /* card hero numbers */
+  --text-h1: 20px;       /* view titles */
+  --text-num-md: 18px;   /* section totals */
+  --text-h2: 15px;       /* card titles */
+  --text-body: 14px;     /* default text */
+  --text-sm2: 13px;      /* line items, tables, buttons */
+  --text-xs2: 12px;      /* metadata, captions */
+  --text-label: 11px;    /* UPPERCASE micro-labels */
+  --text-micro: 10px;    /* chart axes only */
+}
+
+.num { font-variant-numeric: tabular-nums; }
