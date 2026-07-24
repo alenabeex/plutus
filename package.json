@@ -4,9 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 127.0.0.1",
+    "dev": "next dev -H 127.0.0.1 -p ${PORT:-8420}",
     "build": "next build",
-    "start": "next start -H 127.0.0.1",
+    "start": "next start -H 127.0.0.1 -p ${PORT:-8420}",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
