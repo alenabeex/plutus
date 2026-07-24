@@ -1,5 +1,5 @@
-import { NextRequest } from "next/server";
-import { requireUnlocked, withRefreshedSession } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db, latestBalances, snapshotNetworth } from "@/lib/db";
 import type { NetworthData } from "@/lib/types";
 
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   const rows = latestBalances(d);
 
   // Build groups
-  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { id: number; code: string; name: string; sub: string; value: number; logo: string | null; mask: string | null }[] }>();
+  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { id: number; code: string; name: string; sub: string; value: number; logo: string | null; mask: string | null; kind: string }[] }>();
   for (const name of GROUP_ORDER) {
     groupMap.set(name, { name, type: name === "Credit Cards" ? "liability" : "asset", items: [] });
   }
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
         name = name.slice(0, sep.i);
       }
     }
-    group.items.push({ id: row.id, code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null, mask: row.mask ?? null });
+    group.items.push({ id: row.id, code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null, mask: row.mask ?? null, kind: row.kind });
   }
   const groups = GROUP_ORDER.map((n) => groupMap.get(n)!).filter((g) => g.items.length > 0);
 
@@ -125,3 +125,28 @@ export async function GET(req: NextRequest) {
 
   return withRefreshedSession(req, body);
 }
+
+// Rename an account — sets an owner nickname that overrides the issuer's
+// name (e.g. two Chase cards both called "CREDIT CARD"). An empty/omitted
+// nickname clears the override and reverts to the issuer name.
+export const PUT = withJsonErrors(async (req: NextRequest) => {
+  const locked = requireUnlocked(req);
+  if (locked) return locked;
+
+  const body = await req.json() as { accountId: number; nickname: string | null };
+
+  if (typeof body.accountId !== "number") {
+    return NextResponse.json({ error: "accountId is required" }, { status: 400 });
+  }
+
+  const d = db();
+  const account = d.prepare(`SELECT id FROM accounts WHERE id = ?`).get(body.accountId);
+  if (!account) {
+    return NextResponse.json({ error: "Account not found" }, { status: 404 });
+  }
+
+  const nickname = body.nickname?.trim() || null;
+  d.prepare(`UPDATE accounts SET nickname = ? WHERE id = ?`).run(nickname, body.accountId);
+
+  return withRefreshedSession(req, { ok: true });
+});

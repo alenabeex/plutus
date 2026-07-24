@@ -35,14 +35,23 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
         .all(item.id) as { name: string }[];
       const sub = accts.map((a) => a.name).join(" · ");
       const code = item.institution.slice(0, 2).toUpperCase();
+      // Traffic-light health: red = needs re-auth, yellow = never synced or
+      // last sync older than 36h (a missed daily 08:00 run + slack), green
+      // otherwise. Label shows the date, not just a time — "5:00 PM" alone
+      // can't distinguish today's sync from last Tuesday's.
+      const syncedAt = item.last_synced ? new Date(item.last_synced) : null;
+      const ageMs = syncedAt ? Date.now() - syncedAt.getTime() : Infinity;
+      const health: "good" | "stale" | "error" =
+        item.status === "reauth" ? "error" : ageMs > 36 * 60 * 60 * 1000 ? "stale" : "good";
       return {
         code,
         name: item.institution,
         sub,
         status: (item.status === "reauth" ? "reauth" : "healthy") as "healthy" | "reauth",
-        last: item.last_synced
-          ? new Date(item.last_synced).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-          : "—",
+        last: syncedAt
+          ? syncedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+          : "Never synced",
+        health,
         logo: item.logo,
       };
     });
@@ -60,12 +69,14 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       )
       .all() as { institution: string; code: string; sub: string }[];
 
+    // Placeholder rows aren't real Plaid connections — amber, "Not linked".
     institutions = instRows.map((r) => ({
       code: r.code,
       name: r.institution,
       sub: r.sub,
       status: "healthy" as const,
-      last: "—",
+      last: "Not linked",
+      health: "stale" as const,
     }));
   }
 

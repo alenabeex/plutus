@@ -8,13 +8,9 @@ import { usd0 } from "@/lib/format";
 import type { ConnectionsData } from "@/lib/types";
 import { CARD } from "@/lib/styles";
 
-// ─── constants ───────────────────────────────────────────────────────────────
-const INK   = "#16181d";
-const MUTED = "#7a7f88";
-const LINE  = "#e3e5e9";
-const SOFT  = "#eef0f3";
-const GOOD  = "#3e7c52";
-const BAD   = "#b04a3f";
+// colors from the shared palette (lib/colors) — this file used to re-declare
+// them locally; swapped to the import when WARN was added for the health dot
+import { INK, MUTED, LINE, SOFT, GOOD, BAD, WARN } from "@/lib/colors";
 
 // ─── Plaid Link wrapper ───────────────────────────────────────────────────────
 // Isolated so usePlaidLink only mounts when we have a token.
@@ -591,21 +587,25 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                 )}
                 {(
                   <span className="relative flex items-center gap-2 ml-auto">
-                    {/* .dot */}
+                    {/* last-synced date, then the health dot after it */}
+                    <span className="num text-xs2" style={{ color: MUTED }}>
+                      {inst.last}
+                    </span>
+                    {/* .dot — green fresh · amber stale/never · red re-auth */}
                     <span
                       className="shrink-0 inline-block rounded-full"
-                      title={inst.status === "healthy" ? "Healthy" : "Needs re-auth"}
+                      title={
+                        inst.health === "good" ? "Healthy — synced recently"
+                        : inst.health === "stale" ? "Stale — no recent sync"
+                        : "Needs re-auth"
+                      }
                       style={{
                         width: 8,
                         height: 8,
-                        background: inst.status === "healthy" ? GOOD : BAD,
+                        background: inst.health === "good" ? GOOD : inst.health === "stale" ? WARN : BAD,
                       }}
                     />
-                    {inst.status === "healthy" ? (
-                      <span className="num text-xs2" style={{ color: MUTED }}>
-                        {inst.last}
-                      </span>
-                    ) : (
+                    {inst.health === "error" && (
                       <button
                         onClick={() => requestLinkToken(i)}
                         style={{

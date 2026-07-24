@@ -10,3 +10,7 @@ export const SOFT = "#eef0f3";
 export const CARD = "#ffffff";
 export const GOOD = "#3e7c52";
 export const BAD = "#b04a3f";
+// Connection-health amber (stale sync). GOOD/BAD stay money-direction
+// semantics; the traffic-light dot on Connections reuses green/red and
+// adds this for the in-between state.
+export const WARN = "#b8862e";

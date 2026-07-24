@@ -5,6 +5,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 const DEV = process.env.NODE_ENV !== "production";
 
+// Demo-only tunnel allowlist (e.g. QA tools that need a public URL): one
+// extra hostname, active only when FT_DEMO=1. Never applies to the real
+// finance.db process — production and non-demo dev keep localhost-only.
+const DEMO = process.env.FT_DEMO === "1";
+const TUNNEL_HOST = DEMO ? process.env.FT_TUNNEL_HOST : undefined;
+
 // CSP: self-only, with the exact allowances Plaid Link needs (its script and
 // iframe load from cdn.plaid.com). Next.js dev tooling needs unsafe-eval —
 // dev only, never in production.
@@ -24,7 +30,7 @@ const CSP = [
 
 export default function proxy(req: NextRequest) {
   const host = req.headers.get("host")?.split(":")[0] ?? "";
-  if (host !== "127.0.0.1" && host !== "localhost") {
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== TUNNEL_HOST) {
     return new NextResponse("Forbidden — local access only", { status: 403 });
   }
 
@@ -37,7 +43,7 @@ export default function proxy(req: NextRequest) {
     const oHost = origin
       ? (() => { try { return new URL(origin).hostname; } catch { return ""; } })()
       : "";
-    if (oHost !== "127.0.0.1" && oHost !== "localhost") {
+    if (oHost !== "127.0.0.1" && oHost !== "localhost" && oHost !== TUNNEL_HOST) {
       return new NextResponse("Forbidden — cross-origin write blocked", { status: 403 });
     }
   }

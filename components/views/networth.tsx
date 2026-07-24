@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { usd, usd0 } from "@/lib/format";
@@ -321,9 +322,166 @@ function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: Donu
   );
 }
 
+// ─── account row (rename via ⋯ menu — Plaid-sourced accounts only; manual
+// assets keep their own name-edit path in Connections) ──────────────────────
+
+function AccountRow({
+  item,
+  valColor,
+  isLast,
+  onSaved,
+  onLocked,
+}: {
+  item: NetworthData["groups"][number]["items"][number];
+  valColor: string;
+  isLast: boolean;
+  onSaved: () => void;
+  onLocked: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const renamable = item.kind !== "manual";
+
+  const save = async (raw: string) => {
+    setEditing(false);
+    const nickname = raw.trim();
+    if (nickname === item.name) return;
+    const res = await fetch("/api/networth", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: item.id, nickname: nickname || null }),
+    });
+    if (res.status === 401) { onLocked(); return; }
+    onSaved();
+  };
+
+  return (
+    /* .acct */
+    <div
+      className="flex items-center gap-3 py-2"
+      style={{
+        borderBottom: isLast ? "none" : `1px solid ${SOFT}`,
+      }}
+    >
+      {/* .ava — institution logo from Plaid when present, else initials */}
+      {item.logo ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={`data:image/png;base64,${item.logo}`}
+          alt=""
+          aria-hidden
+          className="shrink-0"
+          style={{ width: 38, height: 38, borderRadius: "50%", objectFit: "cover", background: SOFT }}
+        />
+      ) : (
+        <span
+          className="flex items-center justify-center shrink-0 text-label"
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: "50%",
+            background: SOFT,
+            fontWeight: 700,
+            color: MUTED,
+          }}
+          aria-hidden
+        >
+          {item.code}
+        </span>
+      )}
+      {/* .who — title + subtitle, one line each, truncate overflow */}
+      <span className="min-w-0 flex-1">
+        {editing ? (
+          <input
+            key={item.name}
+            type="text"
+            autoFocus
+            defaultValue={item.name}
+            onBlur={(e) => save(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="block w-full py-0.5 px-1.5 text-body font-semibold"
+            style={{
+              border: `1px solid ${MUTED}`,
+              borderRadius: 6,
+              color: INK,
+              background: "#fff",
+            }}
+          />
+        ) : (
+          <b className="block text-body font-semibold truncate" style={{ color: INK }}>{item.name}</b>
+        )}
+        {item.sub || item.mask ? (
+          <span className="block text-xs2 truncate" style={{ color: MUTED }}>
+            {[item.sub, item.mask ? `···${item.mask}` : ""].filter(Boolean).join(" · ")}
+          </span>
+        ) : null}
+      </span>
+      {/* .val */}
+      <span
+        className="num text-body text-right font-semibold"
+        style={{ color: valColor, fontWeight: item.value === 0 ? 400 : 600 }}
+      >
+        {usd(item.value)}
+      </span>
+      {/* ⋯ rename menu — Plaid/manual-entry accounts only, hidden for manual
+          assets (those rename via Connections' own label editor) */}
+      {renamable && (
+        <span className="relative shrink-0">
+          <button
+            aria-label={`Options for ${item.name}`}
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{
+              all: "unset", cursor: "pointer", color: MUTED,
+              borderRadius: 8, padding: "4px 4px", display: "inline-flex", alignItems: "center",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = INK)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = MUTED)}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {menuOpen && (
+            <span
+              className="absolute right-0 z-20 p-1"
+              style={{
+                top: 26, background: "#fff", border: `1px solid ${SOFT}`,
+                borderRadius: 10, boxShadow: "0 8px 30px rgba(16,17,20,.12)",
+              }}
+            >
+              <button
+                onClick={() => { setMenuOpen(false); setEditing(true); }}
+                style={{
+                  all: "unset", cursor: "pointer", display: "block",
+                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                  color: INK, borderRadius: 8, whiteSpace: "nowrap",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+              >
+                Rename
+              </button>
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── account group (subhead + rows) ─────────────────────────────────────────
 
-function AccountGroup({ group }: { group: NetworthData["groups"][number] }) {
+function AccountGroup({
+  group,
+  onSaved,
+  onLocked,
+}: {
+  group: NetworthData["groups"][number];
+  onSaved: () => void;
+  onLocked: () => void;
+}) {
   return (
     <div>
       {/* .subhead */}
@@ -339,65 +497,17 @@ function AccountGroup({ group }: { group: NetworthData["groups"][number] }) {
         {group.name}
       </div>
 
-      {group.items.map((item, i) => {
-        // semantic direction: assets green, liabilities red, zero muted
-        const valColor =
-          item.value === 0 ? MUTED : group.type === "liability" ? BAD : GOOD;
-        const isLast = i === group.items.length - 1;
-        return (
-          /* .acct */
-          <div
-            key={item.id}
-            className="flex items-center gap-3 py-2"
-            style={{
-              borderBottom: isLast ? "none" : `1px solid ${SOFT}`,
-            }}
-          >
-            {/* .ava — institution logo from Plaid when present, else initials */}
-            {item.logo ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={`data:image/png;base64,${item.logo}`}
-                alt=""
-                aria-hidden
-                className="shrink-0"
-                style={{ width: 38, height: 38, borderRadius: "50%", objectFit: "cover", background: SOFT }}
-              />
-            ) : (
-              <span
-                className="flex items-center justify-center shrink-0 text-label"
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: "50%",
-                  background: SOFT,
-                  fontWeight: 700,
-                  color: MUTED,
-                }}
-                aria-hidden
-              >
-                {item.code}
-              </span>
-            )}
-            {/* .who — title + subtitle, one line each, truncate overflow */}
-            <span className="min-w-0 flex-1">
-              <b className="block text-body font-semibold truncate" style={{ color: INK }}>{item.name}</b>
-              {item.sub || item.mask ? (
-                <span className="block text-xs2 truncate" style={{ color: MUTED }}>
-                  {[item.sub, item.mask ? `···${item.mask}` : ""].filter(Boolean).join(" · ")}
-                </span>
-              ) : null}
-            </span>
-            {/* .val */}
-            <span
-              className="num ml-auto text-body text-right font-semibold"
-              style={{ color: valColor, fontWeight: item.value === 0 ? 400 : 600 }}
-            >
-              {usd(item.value)}
-            </span>
-          </div>
-        );
-      })}
+      {group.items.map((item, i) => (
+        <AccountRow
+          key={item.id}
+          item={item}
+          // semantic direction: assets green, liabilities red, zero muted
+          valColor={item.value === 0 ? MUTED : group.type === "liability" ? BAD : GOOD}
+          isLast={i === group.items.length - 1}
+          onSaved={onSaved}
+          onLocked={onLocked}
+        />
+      ))}
     </div>
   );
 }
@@ -409,11 +519,15 @@ function UmbrellaCard({
   type,
   total,
   groups,
+  onSaved,
+  onLocked,
 }: {
   label: string;
   type: "asset" | "liability";
   total: number;
   groups: NetworthData["groups"];
+  onSaved: () => void;
+  onLocked: () => void;
 }) {
   const filtered = groups.filter((g) => g.type === type);
   const pos = type === "asset";
@@ -437,7 +551,7 @@ function UmbrellaCard({
       </div>
 
       {filtered.map((g) => (
-        <AccountGroup key={g.name} group={g} />
+        <AccountGroup key={g.name} group={g} onSaved={onSaved} onLocked={onLocked} />
       ))}
     </Card>
   );
@@ -460,7 +574,7 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
   const [scrub, setScrub] = useState<{ date: string; total: number } | null>(null);
   const [allocFocus, setAllocFocus] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/networth", { credentials: "same-origin" })
       .then((res) => {
         if (res.status === 401) { onLocked(); return null; }
@@ -475,6 +589,8 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
       .catch(() => {/* network error — leave loading state */});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   if (!data) {
     return (
@@ -637,12 +753,16 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
           type="asset"
           total={data.assets}
           groups={data.groups}
+          onSaved={load}
+          onLocked={onLocked}
         />
         <UmbrellaCard
           label="Liabilities"
           type="liability"
           total={data.liabilities}
           groups={data.groups}
+          onSaved={load}
+          onLocked={onLocked}
         />
       </div>
     </div>

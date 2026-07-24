@@ -19,6 +19,23 @@ type ViewId = (typeof NAV)[number]["id"];
 
 type PinState = "checking" | "needs-setup" | "locked" | "unlocked";
 
+/** Brand mark — an open eye. Plutus was blinded so he'd distribute wealth
+ *  unseeing; the app gives wealth its eyes back. Inline SVG, ink on
+ *  transparent, no asset to load. */
+function PlutusMark({ size = 26 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M2 12 C6.5 5.5, 17.5 5.5, 22 12 C17.5 18.5, 6.5 18.5, 2 12 Z"
+        stroke="#16181d"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="#16181d" />
+    </svg>
+  );
+}
+
 /** current calendar month, '2026-07' */
 const nowMonth = () => {
   const d = new Date();
@@ -93,8 +110,9 @@ export default function Home() {
           reverted from the sidebar experiment): brand above a
           scrollable tab row. */}
       <aside className="top-0 z-10 flex flex-col border-b border-[#e3e5e9] bg-[#f2f3f5] px-4 py-3">
-        <div className="px-3 pb-0 text-h1 font-extrabold tracking-tight">
-          Plutus
+        <div className="flex items-center gap-2 px-3 pb-0">
+          <PlutusMark />
+          <span className="text-h1 font-extrabold tracking-tight">Plutus</span>
         </div>
         <nav
           className="-mx-1 flex gap-1 overflow-x-auto px-1 pt-2"

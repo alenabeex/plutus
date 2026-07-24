@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname),
   },
+  // Demo-only: let a QA tunnel host reach HMR/dev resources. Never applies
+  // outside FT_DEMO=1 — matches the proxy.ts tunnel allowlist.
+  ...(process.env.FT_DEMO === "1" && process.env.FT_TUNNEL_HOST
+    ? { allowedDevOrigins: [process.env.FT_TUNNEL_HOST] }
+    : {}),
 }
 
 export default nextConfig
