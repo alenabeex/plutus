@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   const rows = latestBalances(d);
 
   // Build groups
-  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { code: string; name: string; sub: string; value: number; logo: string | null }[] }>();
+  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { id: number; code: string; name: string; sub: string; value: number; logo: string | null; mask: string | null }[] }>();
   for (const name of GROUP_ORDER) {
     groupMap.set(name, { name, type: name === "Credit Cards" ? "liability" : "asset", items: [] });
   }
@@ -44,7 +44,8 @@ export async function GET(req: NextRequest) {
     // Manual assets encode detail in the label ("Bitcoin · 0.25 BTC",
     // "Masterworks — Ed Ruscha") — split at the first separator into
     // title + subtitle so the view renders one line each.
-    let name = row.name;
+    // An owner-set nickname wins over the issuer's generic name.
+    let name = row.nickname || row.name;
     let sub = row.sub ?? "";
     if (g === "Manual Assets" && !sub) {
       const sep = [" · ", " — ", " - "]
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
         name = name.slice(0, sep.i);
       }
     }
-    group.items.push({ code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null });
+    group.items.push({ id: row.id, code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null, mask: row.mask ?? null });
   }
   const groups = GROUP_ORDER.map((n) => groupMap.get(n)!).filter((g) => g.items.length > 0);
 

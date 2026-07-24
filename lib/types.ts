@@ -15,7 +15,7 @@ export interface NetworthData {
   groups: {
     name: string;
     type: "asset" | "liability";
-    items: { code: string; name: string; sub: string; value: number; logo?: string | null }[];
+    items: { id: number; code: string; name: string; sub: string; value: number; logo?: string | null; mask?: string | null }[];
   }[];
 }
 

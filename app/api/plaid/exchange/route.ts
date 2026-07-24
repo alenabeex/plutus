@@ -89,13 +89,14 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   const accounts = accountsRes.data.accounts;
 
   const upsertAccount = d.prepare(`
-    INSERT INTO accounts (item_id, plaid_account_id, code, name, institution, sub, kind, is_liability)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO accounts (item_id, plaid_account_id, code, name, institution, sub, kind, is_liability, mask)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(plaid_account_id) DO UPDATE SET
       name        = excluded.name,
       institution = excluded.institution,
       kind        = excluded.kind,
-      is_liability = excluded.is_liability
+      is_liability = excluded.is_liability,
+      mask        = excluded.mask
   `);
 
   const upsertBalance = d.prepare(`
@@ -111,6 +112,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
     const rawValue = acct.balances.current ?? 0;
     const value = isLiability ? -Math.abs(rawValue) : rawValue;
 
+    // nickname is deliberately absent from the upsert — a re-link must never
+    // clobber a name the owner chose.
     upsertAccount.run(
       item.id,
       acct.account_id,
@@ -120,6 +123,7 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
       acct.official_name ?? acct.name,
       kind,
       isLiability,
+      acct.mask ?? null,
     );
 
     const row = d

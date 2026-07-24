@@ -117,6 +117,15 @@ function migrate(d: Database.Database) {
   if (!itemCols.has("institution_id")) d.exec(`ALTER TABLE items ADD COLUMN institution_id TEXT`);
   if (!itemCols.has("logo")) d.exec(`ALTER TABLE items ADD COLUMN logo TEXT`);          // base64 152×152 PNG from Plaid
   if (!itemCols.has("primary_color")) d.exec(`ALTER TABLE items ADD COLUMN primary_color TEXT`);
+
+  const acctCols = new Set(
+    (d.prepare(`PRAGMA table_info(accounts)`).all() as { name: string }[]).map((c) => c.name),
+  );
+  // Issuers reuse one generic name across products — two Chase cards both
+  // arrive as "CREDIT CARD"/"Ultimate Rewards®". mask (last 4) is what
+  // actually tells them apart; nickname lets the owner override.
+  if (!acctCols.has("mask")) d.exec(`ALTER TABLE accounts ADD COLUMN mask TEXT`);
+  if (!acctCols.has("nickname")) d.exec(`ALTER TABLE accounts ADD COLUMN nickname TEXT`);
 }
 
 /* ============================================================
@@ -144,14 +153,14 @@ function seed(d: Database.Database) {
   const today = new Date().toISOString().slice(0, 10);
 
   const insAcct = d.prepare(
-    `INSERT INTO accounts (code,name,institution,sub,kind,is_liability) VALUES (?,?,?,?,?,?)`,
+    `INSERT INTO accounts (code,name,institution,sub,kind,is_liability,mask) VALUES (?,?,?,?,?,?,?)`,
   );
   const insBal = d.prepare(`INSERT INTO balances (account_id,date,value) VALUES (?,?,?)`);
   const insMan = d.prepare(`INSERT INTO manual_assets (account_id,label) VALUES (?,?)`);
   const insManVal = d.prepare(`INSERT INTO manual_asset_values (manual_asset_id,date,value) VALUES (?,?,?)`);
 
   for (const a of cfg.accounts) {
-    const id = insAcct.run(a.code, a.name, a.institution, a.sub, a.kind, a.is_liability)
+    const id = insAcct.run(a.code, a.name, a.institution, a.sub, a.kind, a.is_liability, a.mask ?? null)
       .lastInsertRowid as number;
     insBal.run(id, today, a.value);
     if (a.manualLabel) {
@@ -201,6 +210,7 @@ export function latestBalances(d = db()) {
   return d
     .prepare(
       `SELECT a.id, a.code, a.name, a.institution, a.sub, a.kind, a.is_liability,
+              a.mask, a.nickname,
               (SELECT value FROM balances b WHERE b.account_id = a.id ORDER BY date DESC LIMIT 1) AS value,
               (SELECT logo FROM items i WHERE i.id = a.item_id) AS logo
        FROM accounts a WHERE a.active = 1`,
@@ -208,6 +218,7 @@ export function latestBalances(d = db()) {
     .all() as {
     id: number; code: string; name: string; institution: string; sub: string;
     kind: string; is_liability: number; value: number; logo: string | null;
+    mask: string | null; nickname: string | null;
   }[];
 }
 

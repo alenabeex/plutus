@@ -347,7 +347,7 @@ function AccountGroup({ group }: { group: NetworthData["groups"][number] }) {
         return (
           /* .acct */
           <div
-            key={`${item.code}-${item.name}`}
+            key={item.id}
             className="flex items-center gap-3 py-2"
             style={{
               borderBottom: isLast ? "none" : `1px solid ${SOFT}`,
@@ -382,8 +382,10 @@ function AccountGroup({ group }: { group: NetworthData["groups"][number] }) {
             {/* .who — title + subtitle, one line each, truncate overflow */}
             <span className="min-w-0 flex-1">
               <b className="block text-body font-semibold truncate" style={{ color: INK }}>{item.name}</b>
-              {item.sub ? (
-                <span className="block text-xs2 truncate" style={{ color: MUTED }}>{item.sub}</span>
+              {item.sub || item.mask ? (
+                <span className="block text-xs2 truncate" style={{ color: MUTED }}>
+                  {[item.sub, item.mask ? `···${item.mask}` : ""].filter(Boolean).join(" · ")}
+                </span>
               ) : null}
             </span>
             {/* .val */}

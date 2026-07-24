@@ -8,6 +8,8 @@ export interface SeedAccount {
   code: string; name: string; institution: string; sub: string;
   kind: "cash" | "investment" | "credit" | "manual";
   is_liability: 0 | 1; value: number;
+  /** last 4 — the only thing separating two cards an issuer names identically */
+  mask?: string;
   /** if set, also tracked as a manual asset with value history */
   manualLabel?: string;
 }
@@ -46,8 +48,13 @@ export const DEMO_SEED: SeedConfig = {
     { code: "VG", name: "Brokerage", institution: "Vanguard", sub: "Vanguard", kind: "investment", is_liability: 0, value: 22400.0 },
     { code: "VG", name: "Roth IRA", institution: "Vanguard", sub: "Vanguard", kind: "investment", is_liability: 0, value: 9100.0 },
     { code: "EM", name: "401(k)", institution: "Employer", sub: "Employer", kind: "investment", is_liability: 0, value: 18750.0 },
-    { code: "TC", name: "Travel Card", institution: "First Bank", sub: "First Bank", kind: "credit", is_liability: 1, value: -640.25 },
-    { code: "RC", name: "Rewards Card", institution: "First Bank", sub: "First Bank", kind: "credit", is_liability: 1, value: -120.8 },
+    { code: "TC", name: "Travel Card", institution: "First Bank", sub: "First Bank", kind: "credit", is_liability: 1, value: -640.25, mask: "1187" },
+    { code: "RC", name: "Rewards Card", institution: "First Bank", sub: "First Bank", kind: "credit", is_liability: 1, value: -120.8, mask: "2043" },
+    // Two cards, one generic issuer name — real issuers do this (both of a
+    // Chase pair arrive as "CREDIT CARD"/"Ultimate Rewards®"). Kept in the
+    // demo seed so the mask disambiguation stays exercised without real data.
+    { code: "SB", name: "CREDIT CARD", institution: "Second Bank", sub: "Premier Rewards", kind: "credit", is_liability: 1, value: -310.4, mask: "6612" },
+    { code: "SB", name: "CREDIT CARD", institution: "Second Bank", sub: "Premier Rewards", kind: "credit", is_liability: 1, value: -1875.6, mask: "9908" },
   ],
   categories: [
     "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",
