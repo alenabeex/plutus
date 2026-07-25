@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { usd, usd0 } from "@/lib/format";
@@ -322,8 +321,8 @@ function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: Donu
   );
 }
 
-// ─── account row (rename via ⋯ menu — Plaid-sourced accounts only; manual
-// assets keep their own name-edit path in Connections) ──────────────────────
+// ─── account row (rename by double-clicking the name — Plaid-sourced accounts
+// only; manual assets keep their own name-edit path in Connections) ─────────
 
 function AccountRow({
   item,
@@ -338,7 +337,6 @@ function AccountRow({
   onSaved: () => void;
   onLocked: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const renamable = item.kind !== "manual";
 
@@ -412,7 +410,14 @@ function AccountRow({
             }}
           />
         ) : (
-          <b className="block text-body font-semibold truncate" style={{ color: INK }}>{item.name}</b>
+          <b
+            className="block text-body font-semibold truncate"
+            style={{ color: INK, cursor: renamable ? "text" : undefined }}
+            title={renamable ? "Double-click to rename" : undefined}
+            onDoubleClick={renamable ? () => setEditing(true) : undefined}
+          >
+            {item.name}
+          </b>
         )}
         {item.sub || item.mask ? (
           <span className="block text-xs2 truncate" style={{ color: MUTED }}>
@@ -427,46 +432,6 @@ function AccountRow({
       >
         {usd(item.value)}
       </span>
-      {/* ⋯ rename menu — Plaid/manual-entry accounts only, hidden for manual
-          assets (those rename via Connections' own label editor) */}
-      {renamable && (
-        <span className="relative shrink-0">
-          <button
-            aria-label={`Options for ${item.name}`}
-            onClick={() => setMenuOpen((v) => !v)}
-            style={{
-              all: "unset", cursor: "pointer", color: MUTED,
-              borderRadius: 8, padding: "4px 4px", display: "inline-flex", alignItems: "center",
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = INK)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = MUTED)}
-          >
-            <MoreHorizontal size={16} />
-          </button>
-          {menuOpen && (
-            <span
-              className="absolute right-0 z-20 p-1"
-              style={{
-                top: 26, background: "#fff", border: `1px solid ${SOFT}`,
-                borderRadius: 10, boxShadow: "0 8px 30px rgba(16,17,20,.12)",
-              }}
-            >
-              <button
-                onClick={() => { setMenuOpen(false); setEditing(true); }}
-                style={{
-                  all: "unset", cursor: "pointer", display: "block",
-                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                  color: INK, borderRadius: 8, whiteSpace: "nowrap",
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-              >
-                Rename
-              </button>
-            </span>
-          )}
-        </span>
-      )}
     </div>
   );
 }

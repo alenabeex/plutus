@@ -109,13 +109,13 @@ export default function Home() {
       {/* Horizontal top bar at every width (per Alena 2026-07-22 —
           reverted from the sidebar experiment): brand above a
           scrollable tab row. */}
-      <aside className="top-0 z-10 flex flex-col border-b border-[#e3e5e9] bg-[#f2f3f5] px-4 py-3">
-        <div className="flex items-center gap-2 px-3 pb-0">
-          <PlutusMark />
-          <span className="text-h1 font-extrabold tracking-tight">Plutus</span>
-        </div>
+      {/* aside shares main's responsive padding so brand, first nav pill and
+          each view's title sit on one left edge (Alena, 2026-07-24) */}
+      <aside className="top-0 z-10 flex flex-col border-b border-[#e3e5e9] bg-[#f2f3f5] px-4 py-3 sm:px-6 lg:px-9">
+        {/* wordmark only — the eye lives on the PIN gate (Alena, 2026-07-24) */}
+        <span className="text-h1 font-extrabold tracking-tight">Plutus</span>
         <nav
-          className="-mx-1 flex gap-1 overflow-x-auto px-1 pt-2"
+          className="flex gap-1 overflow-x-auto pt-2"
           aria-label="Main"
         >
           {NAV.map((n) => (
@@ -230,13 +230,16 @@ function PinGate({
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f2f3f5] text-[#16181d]">
       <Card className="w-[320px] rounded-2xl border-none p-6 shadow-sm">
-        <div className="text-h2 font-bold">
-          {state === "checking"
-            ? "Plutus"
-            : setup
-              ? "Create a 6-digit PIN"
-              : "Enter PIN"}
+        {/* stacked lockup — eye above wordmark (Alena, 2026-07-24) */}
+        <div className="flex flex-col items-start gap-1">
+          <PlutusMark />
+          <span className="text-h1 font-extrabold tracking-tight">Plutus</span>
         </div>
+        {state !== "checking" && (
+          <div className="mt-4 text-h2 font-bold">
+            {setup ? "Create a 6-digit PIN" : "Enter PIN"}
+          </div>
+        )}
         {state !== "checking" && (
           <div className="mt-4 flex flex-col gap-3">
             <input
