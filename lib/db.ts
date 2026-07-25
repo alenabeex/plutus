@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { dbKey } from "./keychain";
-import { DEMO_SEED, type SeedConfig } from "./seed-config";
+import { DEMO_SEED, DEFAULT_CATEGORIES, type SeedConfig } from "./seed-config";
 import { gradeFor } from "./format";
 
 // Data NEVER lives in the vault/git — ~/FinanceTracker/ only (plan §Decisions).
@@ -130,20 +130,27 @@ function migrate(d: Database.Database) {
 
 /* ============================================================
    Seed — runs once on a fresh database.
-   Config resolution: ~/FinanceTracker/seed.local.json (real data,
-   outside any repo) → DEMO_SEED (fake, publishable) as fallback.
+   Config resolution:
+     FT_DEMO=1                       → DEMO_SEED (fake, publishable)
+     seed.local.json present         → that file (personal bootstrap)
+     otherwise                       → NOTHING. A blank install is blank.
+   A real first run must show zero accounts and zero connections — a new
+   user cloning the repo gets an empty app to link their own bank into,
+   never someone else's fake "First Bank / Marcus / Vanguard". Categories
+   are the one exception: they're app scaffolding, not data.
    Totals are computed from the arrays — a config can't disagree
    with itself. No fabricated history: the net-worth graph accrues
    from day 1.
    ============================================================ */
 const SEED_LOCAL_PATH = path.join(DATA_DIR, "seed.local.json");
 
-function loadSeedConfig(): SeedConfig {
+function loadSeedConfig(): SeedConfig | null {
+  if (DEMO) return DEMO_SEED;
   // demo mode never touches the real seed — fake data only (AGENTS.md rule 2)
-  if (!DEMO && existsSync(SEED_LOCAL_PATH)) {
+  if (existsSync(SEED_LOCAL_PATH)) {
     return JSON.parse(readFileSync(SEED_LOCAL_PATH, "utf8")) as SeedConfig;
   }
-  return DEMO_SEED;
+  return null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -151,6 +158,15 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 function seed(d: Database.Database) {
   const cfg = loadSeedConfig();
   const today = new Date().toISOString().slice(0, 10);
+
+  // Blank install: categories only (app scaffolding, needed before any
+  // transaction can be categorized). No accounts, no connections, no
+  // months, no subscriptions — the user links their own bank.
+  if (!cfg) {
+    const insCat = d.prepare(`INSERT INTO categories (name,sort) VALUES (?,?)`);
+    DEFAULT_CATEGORIES.forEach((c, i) => insCat.run(c, i));
+    return;
+  }
 
   const insAcct = d.prepare(
     `INSERT INTO accounts (code,name,institution,sub,kind,is_liability,mask) VALUES (?,?,?,?,?,?,?)`,

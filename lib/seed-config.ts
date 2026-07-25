@@ -36,6 +36,15 @@ export interface SeedConfig {
   subscriptions: SeedSubscription[];
 }
 
+// Variable-spend categories. App scaffolding, not user data — a blank
+// install seeds these and nothing else, so transactions have somewhere to
+// land before the user has linked anything.
+export const DEFAULT_CATEGORIES = [
+  "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",
+  "Pets", "Gifts", "Car Gas", "Travel / Parking", "Shopping / Personal",
+  "Education / Training", "Apps / Subs", "Interest Fees / Violations",
+];
+
 // Grade computation lives in lib/format.ts (gradeFor) — single source.
 
 /** Fake, publishable demo data — used only when no seed.local.json exists. */
