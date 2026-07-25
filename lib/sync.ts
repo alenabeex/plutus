@@ -2,7 +2,8 @@ import type Database from "better-sqlite3-multiple-ciphers";
 import { db, snapshotNetworth } from "./db";
 import { deriveAll } from "./derive";
 import { createMonth } from "./budget-ops";
-import { getPlaidClient } from "./plaid";
+import { getPlaidClient, fetchBranding } from "./plaid";
+import type { PlaidApi } from "plaid";
 
 // Shared Plaid sync core — used by both app/api/plaid/sync/route.ts (HTTP)
 // and scripts/cli.ts (`cli sync`, no-HTTP). Keep this the single source of
@@ -12,6 +13,46 @@ import { getPlaidClient } from "./plaid";
 export type SyncOutcome =
   | { configured: false }
   | { configured: true; synced: number; errors: string[] };
+
+// Branding is fetched at link time, but the logo/institution_id columns were
+// added to `items` after the first connections existed — those rows have no
+// logo and nothing else backfills them, so they'd render as initials forever.
+// Fill any gap here: only rows still missing a logo are queried, so once an
+// institution has one this costs zero Plaid calls.
+async function backfillBranding(client: PlaidApi, d: Database.Database) {
+  const stale = d
+    .prepare(
+      `SELECT id, access_token, institution_id FROM items
+       WHERE logo IS NULL AND status != 'removed'`,
+    )
+    .all() as { id: number; access_token: string; institution_id: string | null }[];
+
+  for (const item of stale) {
+    try {
+      // Pre-migration rows can be missing institution_id too — Plaid can map
+      // the access token back to its institution.
+      let instId = item.institution_id;
+      if (!instId) {
+        const res = await client.itemGet({ access_token: item.access_token });
+        instId = res.data.item.institution_id ?? null;
+        if (!instId) continue;
+      }
+
+      const { logo, primaryColor } = await fetchBranding(client, instId);
+      // COALESCE so an institution that publishes no logo doesn't wipe a
+      // primary_color we already hold.
+      d.prepare(
+        `UPDATE items SET institution_id = ?,
+                          logo = COALESCE(?, logo),
+                          primary_color = COALESCE(?, primary_color)
+         WHERE id = ?`,
+      ).run(instId, logo, primaryColor, item.id);
+    } catch (err) {
+      // Branding is cosmetic — never let it break a sync.
+      console.error(`branding backfill failed for item ${item.id}:`, err);
+    }
+  }
+}
 
 export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcome> {
   const client = getPlaidClient();
@@ -23,6 +64,8 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
 
   const today = new Date().toISOString().slice(0, 10);
   const started = new Date().toISOString();
+
+  await backfillBranding(client, d);
 
   const items = d
     .prepare(`SELECT id, plaid_item_id, access_token, cursor FROM items WHERE status != 'removed'`)

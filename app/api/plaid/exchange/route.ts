@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
-import { getPlaidClient, CountryCode } from "@/lib/plaid";
+import { getPlaidClient, fetchBranding } from "@/lib/plaid";
 import { db, snapshotNetworth } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -56,23 +56,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   `);
   itemInsert.run(plaid_item_id, institution, access_token, today);
 
-  // Institution branding — logo is a base64 152×152 PNG. Optional metadata:
-  // not all institutions have one, and a branding failure must never fail
-  // the link itself.
   if (institution_id) {
-    let logo: string | null = null;
-    let primaryColor: string | null = null;
-    try {
-      const instRes = await client.institutionsGetById({
-        institution_id,
-        country_codes: [CountryCode.Us],
-        options: { include_optional_metadata: true },
-      });
-      logo = instRes.data.institution.logo ?? null;
-      primaryColor = instRes.data.institution.primary_color ?? null;
-    } catch (e) {
-      console.error("institution branding fetch failed:", e);
-    }
+    const { logo, primaryColor } = await fetchBranding(client, institution_id);
     d.prepare(`UPDATE items SET institution_id = ?, logo = ?, primary_color = ? WHERE plaid_item_id = ?`)
       .run(institution_id, logo, primaryColor, plaid_item_id);
   }

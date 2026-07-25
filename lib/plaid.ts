@@ -32,5 +32,28 @@ export function getPlaidClient(): PlaidApi | null {
   return _client;
 }
 
+// Institution branding — logo is a base64 152×152 PNG. Optional metadata:
+// not all institutions publish one, and a branding failure must never fail
+// the caller (linking, syncing), so this always resolves.
+export async function fetchBranding(
+  client: PlaidApi,
+  institutionId: string,
+): Promise<{ logo: string | null; primaryColor: string | null }> {
+  try {
+    const res = await client.institutionsGetById({
+      institution_id: institutionId,
+      country_codes: [CountryCode.Us],
+      options: { include_optional_metadata: true },
+    });
+    return {
+      logo: res.data.institution.logo ?? null,
+      primaryColor: res.data.institution.primary_color ?? null,
+    };
+  } catch (e) {
+    console.error("institution branding fetch failed:", e);
+    return { logo: null, primaryColor: null };
+  }
+}
+
 // Re-export enums so callers don't need to import plaid directly.
 export { Products, CountryCode };
