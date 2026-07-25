@@ -191,10 +191,35 @@ export const DELETE = withJsonErrors(async (req: NextRequest) => {
 
   const name = body.institution.trim();
 
-  const deactivated = d
-    .prepare(`UPDATE accounts SET active = 0 WHERE institution = ? AND kind != 'manual'`)
-    .run(name).changes;
-  const itemsDeleted = d.prepare(`DELETE FROM items WHERE institution = ?`).run(name).changes;
+  // foreign_keys is ON (driver default), so items can't be deleted while
+  // accounts still reference them — the old handler threw
+  // SQLITE_CONSTRAINT_FOREIGNKEY here on every Plaid-linked institution and
+  // the remove silently never happened. Detach accounts (item_id = NULL) as
+  // they're deactivated, THEN delete the item rows. Matching by item_id as
+  // well as institution string also catches accounts whose stored
+  // institution drifted from the item's (older links, sheet imports).
+  // One transaction: either the connection and its accounts all go, or
+  // nothing does.
+  const { deactivated, itemsDeleted } = d.transaction(() => {
+    const deactivated = d
+      .prepare(
+        `UPDATE accounts SET active = 0, item_id = NULL
+         WHERE kind != 'manual'
+           AND (institution = ?
+                OR item_id IN (SELECT id FROM items WHERE institution = ?))`,
+      )
+      .run(name, name).changes;
+    const itemsDeleted = d.prepare(`DELETE FROM items WHERE institution = ?`).run(name).changes;
+
+    // Sweep orphans left by earlier partial removals.
+    d.prepare(
+      `UPDATE accounts SET active = 0, item_id = NULL
+       WHERE active = 1 AND item_id IS NOT NULL
+         AND item_id NOT IN (SELECT id FROM items)`,
+    ).run();
+
+    return { deactivated, itemsDeleted };
+  })();
 
   if (deactivated === 0 && itemsDeleted === 0) {
     return NextResponse.json({ error: "Institution not found" }, { status: 404 });

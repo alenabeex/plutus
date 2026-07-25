@@ -126,6 +126,17 @@ function migrate(d: Database.Database) {
   // actually tells them apart; nickname lets the owner override.
   if (!acctCols.has("mask")) d.exec(`ALTER TABLE accounts ADD COLUMN mask TEXT`);
   if (!acctCols.has("nickname")) d.exec(`ALTER TABLE accounts ADD COLUMN nickname TEXT`);
+
+  // Heal orphans: earlier removals could leave accounts active after their
+  // item was gone (partial deletes from the old handler) — invisible to
+  // remove, still counted in Net Worth. active=0 hides them from views;
+  // history stays in the DB. Seeded/manual accounts (item_id NULL) are
+  // untouched.
+  d.prepare(
+    `UPDATE accounts SET active = 0, item_id = NULL
+     WHERE active = 1 AND item_id IS NOT NULL
+       AND item_id NOT IN (SELECT id FROM items)`,
+  ).run();
 }
 
 /* ============================================================

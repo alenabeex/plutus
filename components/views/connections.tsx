@@ -406,7 +406,15 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
       body: JSON.stringify({ institution: name }),
     });
     if (res.status === 401) { onLocked(); return; }
-    if (res.ok) setData(await res.json() as ConnectionsData);
+    if (res.ok) {
+      setData(await res.json() as ConnectionsData);
+    } else {
+      // A failed remove used to do silently nothing — the row just sat
+      // there. Surface the error and re-fetch so the list shows server truth.
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      window.alert(`Couldn't remove ${name}: ${err?.error ?? `HTTP ${res.status}`}`);
+      load();
+    }
   };
 
   const load = useCallback(() => {
