@@ -112,6 +112,8 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
   const polyRef = useRef<SVGPolylineElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [dashOffset, setDashOffset] = useState<number | null>(null);
+  // measured polyline length — held in state so render never reads the ref
+  const [pathLen, setPathLen] = useState<number | null>(null);
   // scrub: pointer position snaps to the nearest snapshot (click or drag)
   const [hover, setHover] = useState<number | null>(null);
 
@@ -134,6 +136,7 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
     if (!polyRef.current || scaled.length <= 1) return;
     const len = polyRef.current.getTotalLength();
     // Set initial state (full dasharray, offset = len = hidden)
+    setPathLen(len);
     setDashOffset(len);
     // Next frame: animate to 0
     const raf = requestAnimationFrame(() => {
@@ -199,7 +202,7 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
             fill="none"
             stroke={INK}
             strokeWidth={2}
-            strokeDasharray={isAnimating ? polyRef.current?.getTotalLength() ?? undefined : undefined}
+            strokeDasharray={isAnimating ? pathLen ?? undefined : undefined}
             strokeDashoffset={dashOffset ?? undefined}
             style={animate ? { transition: "stroke-dashoffset 0.9s ease-in-out" } : undefined}
           />
@@ -268,10 +271,13 @@ function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: Donu
   const focused = focus ? allocation.find((a) => a.label === focus) : null;
   const focusedPct = focused ? Math.round((focused.value / total) * 1000) / 10 : 0;
 
-  let offset = 0;
-  const arcs = allocation.map((a) => {
+  // Each arc starts where the previous ones end — derived per index, no mutation
+  const arcs = allocation.map((a, i) => {
     const len = C * (a.value / total);
-    const arc = (
+    const offset = allocation
+      .slice(0, i)
+      .reduce((s, x) => s + C * (x.value / total), 0);
+    return (
       <circle
         key={a.label}
         cx={80}
@@ -291,8 +297,6 @@ function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: Donu
         onMouseLeave={() => onFocus(null)}
       />
     );
-    offset += len;
-    return arc;
   });
 
   return (
@@ -527,6 +531,9 @@ function UmbrellaCard({
 const RANGES = ["1M", "6M", "1Y", "All"] as const;
 type Range = (typeof RANGES)[number];
 const RANGE_DAYS: Record<Exclude<Range, "All">, number> = { "1M": 30, "6M": 183, "1Y": 365 };
+// Captured at module load so render stays pure — range cutoffs are day-granular,
+// so drift within a session is invisible.
+const LOADED_AT_MS = Date.now();
 const RANGE_PERIOD: Record<Range, string> = {
   "1M": "this month", "6M": "past 6 months", "1Y": "past year", All: "all time",
 };
@@ -567,7 +574,7 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
   const allPoints = data.chart.points;
   let points = allPoints;
   if (range !== "All") {
-    const cutoff = new Date(Date.now() - RANGE_DAYS[range] * 86400000)
+    const cutoff = new Date(LOADED_AT_MS - RANGE_DAYS[range] * 86400000)
       .toISOString()
       .slice(0, 10);
     const filtered = allPoints.filter((p) => p.date >= cutoff);

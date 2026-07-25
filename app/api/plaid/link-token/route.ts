@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   // Investments is optional — some Plaid plans / sandbox configs may not support it.
   // We add it best-effort; if link creation fails, callers may retry without it.
-  let optionalProducts: Products[] | undefined = [Products.Investments];
+  const optionalProducts: Products[] | undefined = [Products.Investments];
 
   const linkRes = await client.linkTokenCreate({
     user: { client_user_id: "alena-local" },
