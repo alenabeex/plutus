@@ -343,6 +343,11 @@ function AccountRow({
 }) {
   const [editing, setEditing] = useState(false);
   const renamable = item.kind !== "manual";
+  // When two accounts share a name the last four moves up beside the name,
+  // where it does the disambiguating — so the subtitle drops it rather than
+  // printing the same four digits twice on one row.
+  const maskInName = Boolean(item.ambiguous && item.mask);
+  const subMask = !maskInName && item.mask ? `···${item.mask}` : "";
 
   const save = async (raw: string) => {
     setEditing(false);
@@ -421,11 +426,14 @@ function AccountRow({
             onDoubleClick={renamable ? () => setEditing(true) : undefined}
           >
             {item.name}
+            {maskInName ? (
+              <span style={{ color: MUTED, fontWeight: 400 }}>{` ···${item.mask}`}</span>
+            ) : null}
           </b>
         )}
-        {item.sub || item.mask ? (
+        {item.sub || subMask ? (
           <span className="block text-xs2 truncate" style={{ color: MUTED }}>
-            {[item.sub, item.mask ? `···${item.mask}` : ""].filter(Boolean).join(" · ")}
+            {[item.sub, subMask].filter(Boolean).join(" · ")}
           </span>
         ) : null}
       </span>

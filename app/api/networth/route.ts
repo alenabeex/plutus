@@ -34,10 +34,22 @@ export async function GET(req: NextRequest) {
   const rows = latestBalances(d);
 
   // Build groups
-  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { id: number; code: string; name: string; sub: string; value: number; logo: string | null; mask: string | null; kind: string }[] }>();
+  const groupMap = new Map<string, { name: string; type: "asset" | "liability"; items: { id: number; code: string; name: string; sub: string; value: number; logo: string | null; mask: string | null; kind: string; ambiguous: boolean }[] }>();
   for (const name of GROUP_ORDER) {
     groupMap.set(name, { name, type: name === "Credit Cards" ? "liability" : "asset", items: [] });
   }
+
+  // Issuers routinely report every card under one product name — Chase sends
+  // both the Sapphire and the Freedom as "CREDIT CARD" — so the list can show
+  // two identical rows. Flag any display name that isn't unique so the view
+  // can lead with the last four. Renaming one of them resolves the collision
+  // and the flag drops off on the next load.
+  const nameCounts = new Map<string, number>();
+  for (const row of rows) {
+    const displayName = row.nickname || row.name;
+    nameCounts.set(displayName, (nameCounts.get(displayName) ?? 0) + 1);
+  }
+
   for (const row of rows) {
     const g = accountGroup(row);
     const group = groupMap.get(g)!;
@@ -57,7 +69,10 @@ export async function GET(req: NextRequest) {
         name = name.slice(0, sep.i);
       }
     }
-    group.items.push({ id: row.id, code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null, mask: row.mask ?? null, kind: row.kind });
+    // Keyed off the undecorated name — `name` above may have been split for
+    // manual assets. Only flag rows that carry a mask to disambiguate with.
+    const ambiguous = !!row.mask && (nameCounts.get(row.nickname || row.name) ?? 0) > 1;
+    group.items.push({ id: row.id, code: row.code, name, sub, value: row.value ?? 0, logo: row.logo ?? null, mask: row.mask ?? null, kind: row.kind, ambiguous });
   }
   const groups = GROUP_ORDER.map((n) => groupMap.get(n)!).filter((g) => g.items.length > 0);
 
