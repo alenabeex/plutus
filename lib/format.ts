@@ -30,14 +30,15 @@ export function gradeFor(
 ): { grade: string; gradeColor: string } {
   // Raw hex, not var(--good) etc — those names collide with shadcn's theme
   // variables, so a var()-with-fallback silently resolves to the WRONG value.
-  const GOODC = "#3e7c52";
+  // Kept in step with lib/colors.ts — all AA-safe (4.5:1) on white/#f2f3f5.
+  const GOODC = "#3b764e";
   const BADC = "#b04a3f";
-  if (totalIncome <= 0) return { grade: "—", gradeColor: "#7a7f88" };
+  if (totalIncome <= 0) return { grade: "—", gradeColor: "#686d76" };
   if (savings < 0) return { grade: "Very Bad", gradeColor: BADC };
   const ratio = totalVariable / totalIncome;
   if (ratio < 0.15) return { grade: "Great", gradeColor: GOODC };
   if (ratio < 0.20) return { grade: "Good", gradeColor: GOODC };
-  if (ratio < 0.25) return { grade: "Okay", gradeColor: "#d4a017" };
+  if (ratio < 0.25) return { grade: "Okay", gradeColor: "#8a6410" };
   if (ratio < 0.30) return { grade: "Bad", gradeColor: BADC };
   return { grade: "Very Bad", gradeColor: BADC };
 }

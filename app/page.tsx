@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -53,6 +53,12 @@ export default function Home() {
   // Months that have cash-flow sheets (for the picker's data dots)
   const [dataMonths, setDataMonths] = useState<string[]>([]);
 
+  // Once the user picks a month via the picker, their choice wins — no
+  // further auto-snapping. The snap itself runs at most once, on the first
+  // non-empty dataMonths load.
+  const userPickedMonthRef = useRef(false);
+  const autoSnappedRef = useRef(false);
+
   const refreshMonths = useCallback(() => {
     fetch("/api/budget", { credentials: "same-origin" })
       .then((r) => r.json())
@@ -65,6 +71,27 @@ export default function Home() {
   useEffect(() => {
     if (pinState === "unlocked") refreshMonths();
   }, [pinState, refreshMonths]);
+
+  // Cash Flow opened on nowMonth() even when no sheet existed for it, so a
+  // fresh month showed an empty state over real history. Snap to the most
+  // recent sheet <= nowMonth() instead (Alena, 2026-07-24).
+  useEffect(() => {
+    if (userPickedMonthRef.current || autoSnappedRef.current) return;
+    if (dataMonths.length === 0) return;
+    autoSnappedRef.current = true;
+    if (dataMonths.includes(month)) return;
+    const past = dataMonths.filter((m) => m <= nowMonth()).sort();
+    const snapTo = past[past.length - 1];
+    // one-time correction once the async /api/budget month list lands; the
+    // refs above guarantee this branch executes at most once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (snapTo) setMonth(snapTo);
+  }, [dataMonths, month]);
+
+  const handleMonthChange = useCallback((m: string) => {
+    userPickedMonthRef.current = true;
+    setMonth(m);
+  }, []);
 
   useEffect(() => {
     const initial = window.location.hash.slice(1) as ViewId;
@@ -127,7 +154,7 @@ export default function Home() {
                 "shrink-0 cursor-pointer rounded-xl px-3 py-2.5 text-left text-body font-semibold",
                 view === n.id
                   ? "bg-[#16181d] text-white"
-                  : "text-[#7a7f88] hover:bg-[#e9eaee] hover:text-[#16181d]",
+                  : "text-[#686d76] hover:bg-[#e9eaee] hover:text-[#16181d]",
               )}
             >
               {n.label}
@@ -141,7 +168,7 @@ export default function Home() {
         {view === "budget" && (
           <BudgetView
             month={month}
-            onMonthChange={setMonth}
+            onMonthChange={handleMonthChange}
             dataMonths={dataMonths}
             monthMin={monthMin}
             monthMax={monthMax}
@@ -152,7 +179,7 @@ export default function Home() {
         {view === "subs" && (
           <SubscriptionsView
             month={month}
-            onMonthChange={setMonth}
+            onMonthChange={handleMonthChange}
             dataMonths={dataMonths}
             monthMin={monthMin}
             monthMax={monthMax}
@@ -179,6 +206,10 @@ function PinGate({
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set when the last keystroke's raw value held a non-digit (typing "pause"
+  // strips to nothing), so the field looking empty gets explained rather than
+  // silently ignored. Clears on the next digits-only keystroke.
+  const [badChar, setBadChar] = useState(false);
   const setup = state === "needs-setup";
 
   // mode flipped (e.g. setup → locked because a PIN already exists):
@@ -190,6 +221,7 @@ function PinGate({
     setPin("");
     setConfirm("");
     setBusy(false);
+    setBadChar(false);
   }
 
   async function submit() {
@@ -203,8 +235,27 @@ function PinGate({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: setup ? "set" : "unlock", pin }),
       });
-      const body = await r.json();
+      // proxy.ts can reject a request before it reaches the route and answers
+      // with a plain-text 403 body — parse defensively, never assume JSON.
+      const text = await r.text();
+      let body: { ok?: boolean; error?: string; retryInMs?: number } = {};
+      let json = true;
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          json = false;
+        }
+      }
       if (body.ok || (setup && r.ok)) return onUnlocked();
+      if (!r.ok && !json) {
+        setError(
+          r.status === 403
+            ? "Blocked by the local access guard — open the app on localhost"
+            : `Server error (${r.status})`,
+        );
+        return;
+      }
       if (setup && typeof body.error === "string" && body.error.includes("already set")) {
         // a PIN exists from an earlier attempt — switch to the unlock screen
         setError("A PIN is already set — enter it to unlock");
@@ -237,7 +288,7 @@ function PinGate({
         </div>
         {state !== "checking" && (
           <div className="mt-4 text-h2 font-bold">
-            {setup ? "Create a 6-digit PIN" : "Enter PIN"}
+            {setup ? "Create a 6-digit PIN" : "Enter your 6-digit PIN"}
           </div>
         )}
         {state !== "checking" && (
@@ -248,7 +299,11 @@ function PinGate({
               maxLength={6}
               autoFocus
               value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setBadChar(/\D/.test(raw));
+                setPin(raw.replace(/\D/g, ""));
+              }}
               onKeyDown={(e) => e.key === "Enter" && !setup && submit()}
               className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-num-md tracking-[.4em]"
               aria-label="PIN"
@@ -259,18 +314,34 @@ function PinGate({
                 inputMode="numeric"
                 maxLength={6}
                 value={confirm}
-                onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setBadChar(/\D/.test(raw));
+                  setConfirm(raw.replace(/\D/g, ""));
+                }}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-num-md tracking-[.4em]"
                 aria-label="Confirm PIN"
                 placeholder="confirm"
               />
             )}
-            {error && <div className="text-xs2 text-[#b04a3f]">{error}</div>}
-            <Button onClick={submit} disabled={busy} className="w-full">
+            {/* one slot for hint and error so they never stack — a submitted
+                error outranks the live typing hint. */}
+            {error ? (
+              <div className="text-xs2 text-[#b04a3f]">{error}</div>
+            ) : (
+              badChar && (
+                <div className="text-xs2 text-[#686d76]">Digits only — 6-digit PIN</div>
+              )
+            )}
+            <Button
+              onClick={submit}
+              disabled={busy || pin.length !== 6 || (setup && confirm.length !== 6)}
+              className="w-full"
+            >
               {setup ? "Set PIN" : "Unlock"}
             </Button>
-            <div className="text-xs2 text-[#7a7f88]">
+            <div className="text-xs2 text-[#686d76]">
               Locks itself after 15 minutes idle.
             </div>
           </div>

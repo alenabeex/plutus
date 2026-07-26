@@ -2,6 +2,8 @@
 // View components consume these; API routes produce them. Do not extend
 // without updating both sides (and the wireframe contract).
 
+import type { AssetIconKey } from "@/lib/asset-icons";
+
 export interface NetworthData {
   total: number;
   deltaAbs: number;
@@ -54,7 +56,7 @@ export interface ConnectionsData {
   institutions: { code: string; name: string; sub: string; status: "healthy" | "reauth"; last: string; health: "good" | "stale" | "error"; logo?: string | null }[];
   itemsUsed: number;
   itemsTotal: number;
-  manualAssets: { id: number; label: string; value: number }[];
+  manualAssets: { id: number; label: string; value: number; icon: AssetIconKey }[];
   security: string[];
   plaidConfigured: boolean; // keys present in Keychain?
 }

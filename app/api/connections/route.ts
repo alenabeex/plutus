@@ -4,10 +4,12 @@ import { db, snapshotNetworth } from "@/lib/db";
 import { plaidCreds } from "@/lib/keychain";
 import { getPlaidClient } from "@/lib/plaid";
 import type { ConnectionsData } from "@/lib/types";
+import { DEFAULT_ASSET_ICON, guessAssetIcon, isAssetIconKey } from "@/lib/asset-icons";
 
 export const runtime = "nodejs";
 
 const ITEMS_TOTAL = 10; // Plaid free tier limit shown in mockup
+const MAX_LABEL_LENGTH = 200; // generous cap — creation enforces no limit, this just guards against abuse
 
 const SECURITY_STRINGS = [
   'Runs on <b>127.0.0.1 only</b> — unreachable from network',
@@ -101,17 +103,20 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
   // Manual assets with latest values
   const manualRows = d
     .prepare(
-      `SELECT ma.id, ma.label,
+      `SELECT ma.id, ma.label, ma.icon,
         (SELECT value FROM manual_asset_values mav WHERE mav.manual_asset_id = ma.id ORDER BY date DESC LIMIT 1) AS value
        FROM manual_assets ma
        ORDER BY ma.id ASC`
     )
-    .all() as { id: number; label: string; value: number }[];
+    .all() as { id: number; label: string; icon: string | null; value: number }[];
 
   const manualAssets = manualRows.map((r) => ({
     id: r.id,
     label: r.label,
     value: r.value ?? 0,
+    // Rows predating the icon column (and any junk value) fall back to a
+    // keyword guess off the label rather than rendering an empty circle.
+    icon: isAssetIconKey(r.icon) ? r.icon : guessAssetIcon(r.label),
   }));
 
   return {
@@ -135,7 +140,7 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
   if (locked) return locked;
 
-  const body = await req.json() as { label?: string; value?: number };
+  const body = await req.json() as { label?: string; value?: number; icon?: string };
 
   if (
     typeof body.label !== "string" || !body.label.trim() ||
@@ -148,6 +153,9 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   const today = new Date().toISOString().slice(0, 10);
   const label = body.label.trim();
   const code = label.slice(0, 2).toUpperCase();
+  // icon is optional: an unknown/absent key falls back to the default rather
+  // than 400ing — the value is decoration, not data integrity.
+  const icon = isAssetIconKey(body.icon) ? body.icon : DEFAULT_ASSET_ICON;
 
   const acctId = d
     .prepare(
@@ -160,8 +168,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   );
 
   const manualAssetId = d
-    .prepare(`INSERT INTO manual_assets (account_id, label) VALUES (?, ?)`)
-    .run(acctId, label).lastInsertRowid as number;
+    .prepare(`INSERT INTO manual_assets (account_id, label, icon) VALUES (?, ?, ?)`)
+    .run(acctId, label, icon).lastInsertRowid as number;
 
   d.prepare(
     `INSERT INTO manual_asset_values (manual_asset_id, date, value) VALUES (?, ?, ?)`
@@ -269,10 +277,25 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
   if (locked) return locked;
 
-  const body = await req.json() as { manualAssetId: number; value: number };
+  const body = await req.json() as { manualAssetId: number; value: number; label?: string; icon?: string };
 
   if (typeof body.manualAssetId !== "number" || typeof body.value !== "number") {
     return NextResponse.json({ error: "manualAssetId and value are required" }, { status: 400 });
+  }
+
+  // label is optional — value-only PUTs (the common case) keep working exactly
+  // as before. When present, validate the same way creation does (non-empty
+  // after trim) plus a sane max length, so a rename can't produce something
+  // creation would have rejected.
+  let label: string | undefined;
+  if (body.label !== undefined) {
+    if (
+      typeof body.label !== "string" || !body.label.trim() ||
+      body.label.trim().length > MAX_LABEL_LENGTH
+    ) {
+      return NextResponse.json({ error: "label must be a non-empty string" }, { status: 400 });
+    }
+    label = body.label.trim();
   }
 
   const d = db();
@@ -285,6 +308,19 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
 
   if (!asset) {
     return NextResponse.json({ error: "Manual asset not found" }, { status: 404 });
+  }
+
+  if (label !== undefined) {
+    // Mirror creation's derivation so a renamed asset's avatar/initials
+    // (accounts.code) stay consistent with its new label.
+    const code = label.slice(0, 2).toUpperCase();
+    d.prepare(`UPDATE manual_assets SET label = ? WHERE id = ?`).run(label, asset.id);
+    d.prepare(`UPDATE accounts SET name = ?, code = ? WHERE id = ?`).run(label, code, asset.account_id);
+  }
+
+  // icon only changes when a valid key is sent — value-only PUTs leave it alone.
+  if (isAssetIconKey(body.icon)) {
+    d.prepare(`UPDATE manual_assets SET icon = ? WHERE id = ?`).run(body.icon, asset.id);
   }
 
   // Insert new manual_asset_values row

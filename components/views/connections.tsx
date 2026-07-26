@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
-import { MoreHorizontal, X } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { AssetIcon } from "@/components/asset-icon";
 import { usd0 } from "@/lib/format";
 import type { ConnectionsData } from "@/lib/types";
 import { CARD } from "@/lib/styles";
+import {
+  ASSET_ICON_KEYS,
+  ASSET_ICON_LABELS,
+  DEFAULT_ASSET_ICON,
+  type AssetIconKey,
+} from "@/lib/asset-icons";
 
 // colors from the shared palette (lib/colors) — this file used to re-declare
 // them locally; swapped to the import when WARN was added for the health dot
@@ -101,38 +108,168 @@ function ConfirmRemoveDialog({
   );
 }
 
+// ─── ManualAssetDialog — add + edit, one modal ───────────────────────────────
+// Both entry points use it: "+ Add manual asset" in the card header and a
+// row's ⋯ → Edit. Icon, name and value are all set in one place, so an asset
+// can never exist without the avatar its row draws.
+
+interface ManualAssetDialogProps {
+  /** existing asset when editing; omitted when adding */
+  asset?: { id: number; label: string; value: number; icon: AssetIconKey };
+  onSaved: () => void;
+  onCancel: () => void;
+  onLocked: () => void;
+}
+
+function ManualAssetDialog({ asset, onSaved, onCancel, onLocked }: ManualAssetDialogProps) {
+  const editing = asset !== undefined;
+  const [icon, setIcon] = useState<AssetIconKey>(asset?.icon ?? DEFAULT_ASSET_ICON);
+  const [label, setLabel] = useState(asset?.label ?? "");
+  const [draft, setDraft] = useState(asset ? String(asset.value) : "");
+  const [saving, setSaving] = useState(false);
+  const labelRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    setTimeout(() => labelRef.current?.focus(), 0);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const valid = label.trim().length > 0 && draft.trim() !== "" && !isNaN(parseFloat(draft));
+
+  const save = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    const res = await fetch("/api/connections", {
+      method: editing ? "PUT" : "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        editing
+          ? { manualAssetId: asset!.id, label: label.trim(), value: parseFloat(draft), icon }
+          : { label: label.trim(), value: parseFloat(draft), icon },
+      ),
+    });
+    if (res.status === 401) { onLocked(); return; }
+    onSaved();
+  };
+
+  const fieldStyle = {
+    width: "100%",
+    border: `1px solid ${LINE}`,
+    borderRadius: 8,
+    color: INK,
+    background: "#fff",
+  } as const;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(16,17,20,0.32)" }}
+      onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-label={editing ? `Edit ${asset!.label}` : "Add manual asset"}
+    >
+      <div className={CARD} style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
+        <p className="text-num-md mb-4" style={{ fontWeight: 700, color: INK }}>
+          {editing ? "Edit asset" : "Add manual asset"}
+        </p>
+
+        {/* icon picker — the row's avatar, chosen up front */}
+        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Icon</p>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {ASSET_ICON_KEYS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              aria-label={ASSET_ICON_LABELS[k]}
+              aria-pressed={icon === k}
+              title={ASSET_ICON_LABELS[k]}
+              onClick={() => setIcon(k)}
+              style={{ all: "unset", cursor: "pointer", display: "inline-flex" }}
+            >
+              <AssetIcon icon={k} size={36} selected={icon === k} />
+            </button>
+          ))}
+        </div>
+
+        {/* name */}
+        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Name</p>
+        <input
+          ref={labelRef}
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+          placeholder="Bitcoin"
+          className="py-2 px-3 text-sm2 mb-4"
+          style={fieldStyle}
+        />
+
+        {/* value */}
+        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Value</p>
+        <input
+          type="number"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+          placeholder="0"
+          className="py-2 px-3 text-sm2 num"
+          style={{ ...fieldStyle, fontVariantNumeric: "tabular-nums" }}
+        />
+
+        <div className="flex items-center justify-end gap-2 mt-4">
+          <button
+            onClick={onCancel}
+            style={{
+              all: "unset", cursor: "pointer", border: `1px solid ${LINE}`, borderRadius: 8,
+              padding: "8px 12px", fontSize: 13, fontWeight: 600, color: MUTED, background: "#fff",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={!valid || saving}
+            style={{
+              all: "unset",
+              cursor: valid && !saving ? "pointer" : "default",
+              opacity: valid && !saving ? 1 : 0.5,
+              border: `1px solid ${INK}`, borderRadius: 8,
+              padding: "8px 12px", fontSize: 13, fontWeight: 600, color: "#fff", background: INK,
+            }}
+          >
+            {editing ? "Save" : "Add"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ManualAssetRow ──────────────────────────────────────────────────────────
+// Same anatomy as an institution row: avatar · title + category · value · ⋯.
 
 interface ManualAssetRowProps {
   id: number;
   label: string;
   value: number;
+  icon: AssetIconKey;
   isLast: boolean;
   onSaved: () => void;
   onLocked: () => void;
 }
 
-function ManualAssetRow({ id, label, value, isLast, onSaved, onLocked }: ManualAssetRowProps) {
+function ManualAssetRow({ id, label, value, icon, isLast, onSaved, onLocked }: ManualAssetRowProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // per-row edit mode — entered from this row's ⋯ menu
+  // ⋯ → Edit opens the same modal the header's add button uses
   const [editing, setEditing] = useState(false);
-
-  // uncontrolled input (defaultValue keyed to value) — reads on blur, no draft
-  // state, so the row never fights the server value after a reload.
-  const save = async (raw: string) => {
-    setEditing(false); // blur/Enter always exits the row's edit mode
-    const parsed = parseFloat(raw);
-    if (isNaN(parsed) || parsed === value) return;
-    const res = await fetch("/api/connections", {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ manualAssetId: id, value: parsed }),
-    });
-    if (res.status === 401) { onLocked(); return; }
-    onSaved();
-  };
 
   const remove = async () => {
     const res = await fetch("/api/connections", {
@@ -147,103 +284,85 @@ function ManualAssetRow({ id, label, value, isLast, onSaved, onLocked }: ManualA
 
   return (
     <>
-    {/* .line */}
+    {/* .acct — mirrors the institution row anatomy */}
     <div
-      className="flex items-center justify-between gap-2 py-2 text-sm2 num"
+      className="flex items-center gap-3 py-2"
       style={{
         borderBottom: isLast ? "none" : `1px solid ${SOFT}`,
       }}
     >
-      <span style={{ color: MUTED, fontWeight: 400 }}>{label}</span>
-      {editing ? (
-        <span className="flex items-center gap-2">
-          <input
-            key={value}
-            type="number"
-            defaultValue={value}
-            onBlur={(e) => save(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            }}
-            className="py-1 px-2 text-sm2"
+      {/* .ava — the asset's chosen icon stands in for an institution logo */}
+      <AssetIcon icon={icon} />
+      {/* .who — title, then its category */}
+      <span className="min-w-0">
+        <b className="text-body" style={{ display: "block", fontWeight: 600, color: INK }}>
+          {label}
+        </b>
+        <span className="text-xs2" style={{ color: MUTED }}>{ASSET_ICON_LABELS[icon]}</span>
+      </span>
+      <span className="relative flex items-center gap-2 ml-auto">
+        <b className="num" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600, color: GOOD }}>
+          {usd0(value)}
+        </b>
+        {/* ⋯ row menu */}
+        <button
+          aria-label={`Options for ${label}`}
+          onClick={() => setMenuOpen((v) => !v)}
+          style={{
+            all: "unset", cursor: "pointer", color: MUTED,
+            borderRadius: 8, padding: "4px 4px", display: "inline-flex", alignItems: "center",
+          }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = INK)}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = MUTED)}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+        {menuOpen && (
+          <span
+            className="absolute right-0 z-20 p-1"
             style={{
-              width: 90,
-              border: `1px solid ${MUTED}`,
-              borderRadius: 6,
-              fontVariantNumeric: "tabular-nums",
-              color: INK,
-              background: "#fff",
+              top: 26, background: "#fff", border: `1px solid ${SOFT}`,
+              borderRadius: 10, boxShadow: "0 8px 30px rgba(16,17,20,.12)",
             }}
-          />
-          <button
-            aria-label={`Remove ${label}`}
-            title="Remove"
-            onClick={() => setConfirmRemove(true)}
-            style={{
-              all: "unset", cursor: "pointer", color: MUTED,
-              display: "inline-flex", alignItems: "center", padding: 2,
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = BAD)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = MUTED)}
           >
-            <X size={14} strokeWidth={2} />
-          </button>
-        </span>
-      ) : (
-        <span className="relative flex items-center gap-2">
-          <b className="num" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600, color: GOOD }}>
-            {usd0(value)}
-          </b>
-          {/* ⋯ row menu — delete without entering edit mode */}
-          <button
-            aria-label={`Options for ${label}`}
-            onClick={() => setMenuOpen((v) => !v)}
-            style={{
-              all: "unset", cursor: "pointer", color: MUTED,
-              borderRadius: 8, padding: "4px 4px", display: "inline-flex", alignItems: "center",
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = INK)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = MUTED)}
-          >
-            <MoreHorizontal size={16} />
-          </button>
-          {menuOpen && (
-            <span
-              className="absolute right-0 z-20 p-1"
+            <button
+              onClick={() => { setMenuOpen(false); setEditing(true); }}
               style={{
-                top: 26, background: "#fff", border: `1px solid ${SOFT}`,
-                borderRadius: 10, boxShadow: "0 8px 30px rgba(16,17,20,.12)",
+                all: "unset", cursor: "pointer", display: "block",
+                padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                color: INK, borderRadius: 8, whiteSpace: "nowrap",
               }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
             >
-              <button
-                onClick={() => { setMenuOpen(false); setEditing(true); }}
-                style={{
-                  all: "unset", cursor: "pointer", display: "block",
-                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                  color: INK, borderRadius: 8, whiteSpace: "nowrap",
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); setConfirmRemove(true); }}
-                style={{
-                  all: "unset", cursor: "pointer", display: "block",
-                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                  color: BAD, borderRadius: 8, whiteSpace: "nowrap",
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-              >
-                Remove…
-              </button>
-            </span>
-          )}
-        </span>
-      )}
+              Edit…
+            </button>
+            <button
+              onClick={() => { setMenuOpen(false); setConfirmRemove(true); }}
+              style={{
+                all: "unset", cursor: "pointer", display: "block",
+                padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                color: BAD, borderRadius: 8, whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+            >
+              Remove…
+            </button>
+          </span>
+        )}
+      </span>
     </div>
+
+    {/* edit modal — same one the header's add button opens */}
+    {editing && (
+      <ManualAssetDialog
+        asset={{ id, label, value, icon }}
+        onSaved={() => { setEditing(false); onSaved(); }}
+        onCancel={() => setEditing(false)}
+        onLocked={onLocked}
+      />
+    )}
 
     {/* remove-confirmation dialog — not inline, floats over the whole view */}
     {confirmRemove && (
@@ -254,126 +373,6 @@ function ManualAssetRow({ id, label, value, isLast, onSaved, onLocked }: ManualA
       />
     )}
     </>
-  );
-}
-
-// ─── NewManualAssetRow ───────────────────────────────────────────────────────
-
-interface NewManualAssetRowProps {
-  onSaved: () => void;
-  onCancel: () => void;
-  onLocked: () => void;
-}
-
-function NewManualAssetRow({ onSaved, onCancel, onLocked }: NewManualAssetRowProps) {
-  const [label, setLabel] = useState("");
-  const [draft, setDraft] = useState("");
-  const labelRef = useRef<HTMLInputElement>(null);
-  const valueRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setTimeout(() => labelRef.current?.focus(), 0);
-  }, []);
-
-  const valid = label.trim().length > 0 && draft.trim() !== "" && !isNaN(parseFloat(draft));
-
-  const save = async () => {
-    if (!valid) return;
-    const res = await fetch("/api/connections", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: label.trim(), value: parseFloat(draft) }),
-    });
-    if (res.status === 401) { onLocked(); return; }
-    onSaved();
-  };
-
-  return (
-    <div className="py-2">
-      {/* label + value inputs */}
-      <div className="flex items-center justify-between gap-2 num">
-        <input
-          ref={labelRef}
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onCancel();
-            if (e.key === "Enter") valueRef.current?.focus();
-          }}
-          placeholder="Label"
-          className="py-1 px-2 text-sm2"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            border: `1px solid ${MUTED}`,
-            borderRadius: 6,
-            color: INK,
-            background: "#fff",
-          }}
-        />
-        <input
-          ref={valueRef}
-          type="number"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") save();
-            if (e.key === "Escape") onCancel();
-          }}
-          placeholder="0"
-          className="py-1 px-2 text-sm2"
-          style={{
-            width: 90,
-            border: `1px solid ${MUTED}`,
-            borderRadius: 6,
-            fontVariantNumeric: "tabular-nums",
-            color: INK,
-            background: "#fff",
-          }}
-        />
-      </div>
-      {/* Cancel / Add */}
-      <div className="flex items-center justify-end gap-2 mt-2">
-        <button
-          onClick={onCancel}
-          style={{
-            all: "unset",
-            cursor: "pointer",
-            border: `1px solid ${SOFT}`,
-            borderRadius: 10,
-            padding: "4px 12px",
-            fontSize: 12,
-            color: MUTED,
-            fontWeight: 600,
-            background: "#fff",
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = SOFT)}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#fff")}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={save}
-          disabled={!valid}
-          style={{
-            all: "unset",
-            cursor: valid ? "pointer" : "default",
-            opacity: valid ? 1 : 0.5,
-            border: `1px solid ${LINE}`,
-            borderRadius: 10,
-            padding: "4px 12px",
-            fontSize: 12,
-            fontWeight: 600,
-            background: "#fff",
-            color: INK,
-          }}
-        >
-          Add
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -678,10 +677,30 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
 
         {/* ── Manual Assets card ── */}
         <Card className={CARD}>
+            {/* header: title left, + Add manual asset top-right — same as Linked Institutions */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-num-md" style={{ fontWeight: 700, color: INK }}>
                 Manual Assets
               </h2>
+              <button
+                onClick={() => setAddingAsset(true)}
+                style={{
+                  all: "unset",
+                  cursor: "pointer",
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 10,
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: "#fff",
+                  color: INK,
+                  whiteSpace: "nowrap",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = SOFT)}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#fff")}
+              >
+                + Add manual asset
+              </button>
             </div>
 
             {data.manualAssets.map((m, i) => (
@@ -690,41 +709,28 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                 id={m.id}
                 label={m.label}
                 value={m.value}
+                icon={m.icon}
                 isLast={i === data.manualAssets.length - 1}
                 onSaved={load}
                 onLocked={onLocked}
               />
             ))}
 
-            {/* + Add manual asset */}
-            <div className="mt-2">
-              {addingAsset ? (
-                <NewManualAssetRow
-                  onSaved={() => { setAddingAsset(false); load(); }}
-                  onCancel={() => setAddingAsset(false)}
-                  onLocked={onLocked}
-                />
-              ) : (
-                <button
-                  onClick={() => setAddingAsset(true)}
-                  style={{
-                    all: "unset",
-                    cursor: "pointer",
-                    border: `1px solid ${SOFT}`,
-                    borderRadius: 10,
-                    padding: "4px 10px",
-                    fontSize: 12,
-                    color: MUTED,
-                    fontWeight: 600,
-                    background: "#fff",
-                  }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = SOFT)}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#fff")}
-                >
-                  + Add manual asset
-                </button>
-              )}
-            </div>
+            {/* empty state — the card can't be a blank box under its header */}
+            {data.manualAssets.length === 0 && (
+              <p className="text-xs2 py-2" style={{ color: MUTED }}>
+                Nothing here yet — add anything Plaid can&apos;t see: crypto, a car, property.
+              </p>
+            )}
+
+            {/* add modal */}
+            {addingAsset && (
+              <ManualAssetDialog
+                onSaved={() => { setAddingAsset(false); load(); }}
+                onCancel={() => setAddingAsset(false)}
+                onLocked={onLocked}
+              />
+            )}
           </Card>
 
           {/* Security card */}

@@ -127,6 +127,14 @@ function migrate(d: Database.Database) {
   if (!acctCols.has("mask")) d.exec(`ALTER TABLE accounts ADD COLUMN mask TEXT`);
   if (!acctCols.has("nickname")) d.exec(`ALTER TABLE accounts ADD COLUMN nickname TEXT`);
 
+  // v3: manual assets carry an icon key (lib/asset-icons) so their rows read
+  // like the Plaid ones — avatar + title — instead of a bare grey label.
+  // Rows created before this column fall back to a label-keyword guess.
+  const manCols = new Set(
+    (d.prepare(`PRAGMA table_info(manual_assets)`).all() as { name: string }[]).map((c) => c.name),
+  );
+  if (!manCols.has("icon")) d.exec(`ALTER TABLE manual_assets ADD COLUMN icon TEXT`);
+
   // Heal both halves of a half-finished removal. The old connections DELETE
   // handler ran outside a transaction, so when its item delete hit the
   // foreign key it left the database split one way or the other. Nothing but

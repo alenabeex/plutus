@@ -317,8 +317,8 @@ export default function BudgetView({ month, onMonthChange, dataMonths, monthMin,
     setEditCard("expenses");
   }
 
-  async function saveIncome() {
-    if (!data || saving) return;
+  async function saveIncome(): Promise<BudgetData | null> {
+    if (!data || saving) return null;
     setSaving(true);
     const res = await fetch("/api/budget", {
       method: "PUT",
@@ -331,20 +331,21 @@ export default function BudgetView({ month, onMonthChange, dataMonths, monthMin,
       }),
     });
     setSaving(false);
-    if (res.status === 401) { onLocked(); return; }
+    if (res.status === 401) { onLocked(); return null; }
     if (res.status === 409) {
       // closed month — revert
       setEditCard(null);
-      return;
+      return null;
     }
-    if (!res.ok) { setEditCard(null); return; }
+    if (!res.ok) { setEditCard(null); return null; }
     const updated: BudgetData = await res.json();
     setData(updated);
     setEditCard(null);
+    return updated;
   }
 
-  async function saveExpenses() {
-    if (!data || saving) return;
+  async function saveExpenses(): Promise<BudgetData | null> {
+    if (!data || saving) return null;
     setSaving(true);
     const res = await fetch("/api/budget", {
       method: "PUT",
@@ -357,15 +358,61 @@ export default function BudgetView({ month, onMonthChange, dataMonths, monthMin,
       }),
     });
     setSaving(false);
-    if (res.status === 401) { onLocked(); return; }
+    if (res.status === 401) { onLocked(); return null; }
     if (res.status === 409) {
       setEditCard(null);
-      return;
+      return null;
     }
-    if (!res.ok) { setEditCard(null); return; }
+    if (!res.ok) { setEditCard(null); return null; }
     const updated: BudgetData = await res.json();
     setData(updated);
     setEditCard(null);
+    return updated;
+  }
+
+  // has the in-progress income edit diverged from loaded data?
+  function incomeChanged(d: BudgetData): boolean {
+    if (editTaxSetAside.current !== d.taxSetAside) return true;
+    if (editIncome.current.length !== d.income.length) return true;
+    return editIncome.current.some(
+      (item, i) => item.label !== d.income[i].label || item.value !== d.income[i].value,
+    );
+  }
+
+  // has the in-progress expenses edit diverged from loaded data?
+  function expensesChanged(d: BudgetData): boolean {
+    if (editFixed.current.length !== d.fixed.length) return true;
+    if (editVariable.current.length !== d.variable.length) return true;
+    if (
+      editFixed.current.some(
+        (item, i) => item.label !== d.fixed[i].label || item.value !== d.fixed[i].value,
+      )
+    ) return true;
+    return editVariable.current.some(
+      (item, i) => item.label !== d.variable[i].label || item.value !== d.variable[i].value,
+    );
+  }
+
+  // switching into income edit while expenses is being edited: commit
+  // pending expense edits first (same path as expenses' Save button) so
+  // they aren't silently discarded. No-op save if nothing changed.
+  async function switchToIncome(d: BudgetData) {
+    if (editCard === "expenses" && expensesChanged(d)) {
+      const updated = await saveExpenses();
+      if (updated) startEditIncome(updated);
+      return;
+    }
+    startEditIncome(d);
+  }
+
+  // mirror of switchToIncome, for the expenses Edit button
+  async function switchToExpenses(d: BudgetData) {
+    if (editCard === "income" && incomeChanged(d)) {
+      const updated = await saveIncome();
+      if (updated) startEditExpenses(updated);
+      return;
+    }
+    startEditExpenses(d);
   }
 
   // ── header (always rendered — picker must work even on empty months) ──────
@@ -532,7 +579,7 @@ export default function BudgetView({ month, onMonthChange, dataMonths, monthMin,
               editing={editCard === "income"}
               saving={saving}
               onClick={() =>
-                editCard === "income" ? saveIncome() : startEditIncome(d)
+                editCard === "income" ? saveIncome() : switchToIncome(d)
               }
             />
           </div>
@@ -578,7 +625,7 @@ export default function BudgetView({ month, onMonthChange, dataMonths, monthMin,
               editing={editCard === "expenses"}
               saving={saving}
               onClick={() =>
-                editCard === "expenses" ? saveExpenses() : startEditExpenses(d)
+                editCard === "expenses" ? saveExpenses() : switchToExpenses(d)
               }
             />
           </div>
