@@ -66,13 +66,13 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       const hours = Number.isFinite(ageMs) ? Math.floor(ageMs / 3_600_000) : null;
       const healthReason =
         item.status === "reauth"
-          ? "Bank login expired — re-link to resume syncing"
+          ? "Login expired — re-link"
           : !syncedAt
             ? "Never synced"
             : health === "stale"
               ? hours !== null && hours < 48
-                ? `No sync in ${hours}h — daily sync expected by 8 AM`
-                : `No sync in ${Math.round((hours ?? 0) / 24)} days`
+                ? `No sync in ${hours}h`
+                : `No sync in ${Math.round((hours ?? 0) / 24)}d`
               : "Up to date";
       return {
         code,
@@ -111,7 +111,7 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       status: "healthy" as const,
       last: "Not linked",
       health: "stale" as const,
-      healthReason: "Not linked to Plaid yet",
+      healthReason: "Not linked",
     }));
   }
 
