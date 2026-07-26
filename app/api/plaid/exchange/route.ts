@@ -81,7 +81,11 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
       institution = excluded.institution,
       kind        = excluded.kind,
       is_liability = excluded.is_liability,
-      mask        = excluded.mask
+      mask        = excluded.mask,
+      -- Re-linking revives an account a previous removal deactivated and
+      -- detached, instead of silently updating a row no view will render.
+      item_id     = excluded.item_id,
+      active      = 1
   `);
 
   const upsertBalance = d.prepare(`

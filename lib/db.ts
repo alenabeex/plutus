@@ -127,16 +127,31 @@ function migrate(d: Database.Database) {
   if (!acctCols.has("mask")) d.exec(`ALTER TABLE accounts ADD COLUMN mask TEXT`);
   if (!acctCols.has("nickname")) d.exec(`ALTER TABLE accounts ADD COLUMN nickname TEXT`);
 
-  // Heal orphans: earlier removals could leave accounts active after their
-  // item was gone (partial deletes from the old handler) — invisible to
-  // remove, still counted in Net Worth. active=0 hides them from views;
-  // history stays in the DB. Seeded/manual accounts (item_id NULL) are
-  // untouched.
-  d.prepare(
-    `UPDATE accounts SET active = 0, item_id = NULL
-     WHERE active = 1 AND item_id IS NOT NULL
-       AND item_id NOT IN (SELECT id FROM items)`,
-  ).run();
+  // Heal both halves of a half-finished removal. The old connections DELETE
+  // handler ran outside a transaction, so when its item delete hit the
+  // foreign key it left the database split one way or the other. Nothing but
+  // a removal ever sets active = 0 (the column defaults to 1 and sync never
+  // clears it), so active = 0 reliably means "the owner removed this".
+  // Balances and transactions are never touched — history stays.
+  d.transaction(() => {
+    // (a) Accounts still active after their item was deleted: invisible to
+    // Remove, yet still counted in Net Worth.
+    d.prepare(
+      `UPDATE accounts SET active = 0, item_id = NULL
+       WHERE active = 1 AND item_id IS NOT NULL
+         AND item_id NOT IN (SELECT id FROM items)`,
+    ).run();
+
+    // (b) The reverse, and the one that leaves a dead row in Connections:
+    // the accounts were deactivated but the item survived, so the UI kept
+    // rendering a connection with no accounts under it. Detach first — the
+    // foreign key is what blocked the delete in the first place.
+    d.prepare(`UPDATE accounts SET item_id = NULL WHERE item_id IS NOT NULL AND active = 0`).run();
+    d.prepare(
+      `DELETE FROM items
+       WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.item_id = items.id AND a.active = 1)`,
+    ).run();
+  })();
 }
 
 /* ============================================================
