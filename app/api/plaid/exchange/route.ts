@@ -54,7 +54,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
       status       = 'healthy',
       last_synced  = excluded.last_synced
   `);
-  itemInsert.run(plaid_item_id, institution, access_token, today);
+  // Full ISO timestamp — Connections renders date + time from this.
+  itemInsert.run(plaid_item_id, institution, access_token, new Date().toISOString());
 
   if (institution_id) {
     const { logo, primaryColor } = await fetchBranding(client, institution_id);

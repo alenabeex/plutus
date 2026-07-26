@@ -40,7 +40,20 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       // last sync older than 36h (a missed daily 08:00 run + slack), green
       // otherwise. Label shows the date, not just a time — "5:00 PM" alone
       // can't distinguish today's sync from last Tuesday's.
-      const syncedAt = item.last_synced ? new Date(item.last_synced) : null;
+      // last_synced is a full ISO timestamp for anything synced since the
+      // fix; rows from before hold a bare date. A bare date must never go
+      // through new Date(...) for display — it parses as UTC midnight and
+      // renders as "yesterday, 5:00 PM" in Pacific. No real time exists for
+      // those rows, so show the date alone rather than an invented clock.
+      const raw = item.last_synced;
+      const legacyDateOnly = !!raw && !raw.includes("T");
+      let syncedAt: Date | null = null;
+      if (raw && legacyDateOnly) {
+        const [y, m, dd] = raw.split("-").map(Number);
+        syncedAt = new Date(y, m - 1, dd); // local midnight, not UTC
+      } else if (raw) {
+        syncedAt = new Date(raw);
+      }
       const ageMs = syncedAt ? Date.now() - syncedAt.getTime() : Infinity;
       const health: "good" | "stale" | "error" =
         item.status === "reauth" ? "error" : ageMs > 36 * 60 * 60 * 1000 ? "stale" : "good";
@@ -50,7 +63,9 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
         sub,
         status: (item.status === "reauth" ? "reauth" : "healthy") as "healthy" | "reauth",
         last: syncedAt
-          ? syncedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+          ? legacyDateOnly
+            ? syncedAt.toLocaleString("en-US", { month: "short", day: "numeric" })
+            : syncedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
           : "Never synced",
         health,
         logo: item.logo,

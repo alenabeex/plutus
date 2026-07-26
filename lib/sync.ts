@@ -176,10 +176,13 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
         hasMore = txnRes.data.has_more;
       }
 
-      // Persist updated cursor.
+      // Persist updated cursor. last_synced is a full ISO timestamp — the
+      // Connections view shows date AND time, and health staleness is
+      // measured in hours; a bare date used to parse as UTC midnight and
+      // render as "yesterday, 5:00 PM" in Pacific.
       d.prepare(`UPDATE items SET cursor = ?, last_synced = ? WHERE id = ?`).run(
         cursor ?? null,
-        today,
+        new Date().toISOString(),
         item.id,
       );
 
