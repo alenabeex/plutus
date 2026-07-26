@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db, snapshotNetworth } from "@/lib/db";
 import { plaidCreds } from "@/lib/keychain";
+import { getPlaidClient } from "@/lib/plaid";
 import type { ConnectionsData } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -190,6 +191,26 @@ export const DELETE = withJsonErrors(async (req: NextRequest) => {
   }
 
   const name = body.institution.trim();
+
+  // Revoke at Plaid too, best-effort — before the local delete drops the
+  // tokens. Without this the access token stays live at Plaid after the app
+  // forgets the connection: it keeps counting toward the item limit, keeps
+  // billing, and leaves a stale grant in the bank's security center. A
+  // revoke failure never blocks the local remove — the owner asked for the
+  // connection to be gone, and a dead token at Plaid is Plaid's problem.
+  const client = getPlaidClient();
+  if (client) {
+    const tokens = d
+      .prepare(`SELECT access_token FROM items WHERE institution = ?`)
+      .all(name) as { access_token: string }[];
+    for (const t of tokens) {
+      try {
+        await client.itemRemove({ access_token: t.access_token });
+      } catch (e) {
+        console.error("plaid itemRemove failed (continuing local remove):", e);
+      }
+    }
+  }
 
   // foreign_keys is ON (driver default), so items can't be deleted while
   // accounts still reference them — the old handler threw
