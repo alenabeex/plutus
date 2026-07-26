@@ -594,6 +594,15 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                 )}
                 {(
                   <span className="relative flex items-center gap-2 ml-auto">
+                    {/* why the dot isn't green — visible, not hover-only */}
+                    {inst.health !== "good" && (
+                      <span
+                        className="text-xs2 truncate"
+                        style={{ color: inst.health === "stale" ? WARN : BAD, maxWidth: 220 }}
+                      >
+                        {inst.healthReason}
+                      </span>
+                    )}
                     {/* last-synced date, then the health dot after it */}
                     <span className="num text-xs2" style={{ color: MUTED }}>
                       {inst.last}
@@ -601,11 +610,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                     {/* .dot — green fresh · amber stale/never · red re-auth */}
                     <span
                       className="shrink-0 inline-block rounded-full"
-                      title={
-                        inst.health === "good" ? "Healthy — synced recently"
-                        : inst.health === "stale" ? "Stale — no recent sync"
-                        : "Needs re-auth"
-                      }
+                      title={inst.healthReason}
                       style={{
                         width: 8,
                         height: 8,

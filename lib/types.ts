@@ -53,7 +53,7 @@ export interface SubscriptionsData {
 }
 
 export interface ConnectionsData {
-  institutions: { code: string; name: string; sub: string; status: "healthy" | "reauth"; last: string; health: "good" | "stale" | "error"; logo?: string | null }[];
+  institutions: { code: string; name: string; sub: string; status: "healthy" | "reauth"; last: string; health: "good" | "stale" | "error"; healthReason: string; logo?: string | null }[];
   itemsUsed: number;
   itemsTotal: number;
   manualAssets: { id: number; label: string; value: number; icon: AssetIconKey }[];

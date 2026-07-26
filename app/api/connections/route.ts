@@ -59,6 +59,21 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       const ageMs = syncedAt ? Date.now() - syncedAt.getTime() : Infinity;
       const health: "good" | "stale" | "error" =
         item.status === "reauth" ? "error" : ageMs > 36 * 60 * 60 * 1000 ? "stale" : "good";
+      // Why the dot is the color it is — shown in the row, not just hover.
+      // Amber gets a concrete age ("No sync in 3 days"), because "stale"
+      // alone doesn't say whether the daily 8 AM job missed once or the
+      // connection has been dead for a week.
+      const hours = Number.isFinite(ageMs) ? Math.floor(ageMs / 3_600_000) : null;
+      const healthReason =
+        item.status === "reauth"
+          ? "Bank login expired — re-link to resume syncing"
+          : !syncedAt
+            ? "Never synced"
+            : health === "stale"
+              ? hours !== null && hours < 48
+                ? `No sync in ${hours}h — daily sync expected by 8 AM`
+                : `No sync in ${Math.round((hours ?? 0) / 24)} days`
+              : "Up to date";
       return {
         code,
         name: item.institution,
@@ -70,6 +85,7 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
             : syncedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
           : "Never synced",
         health,
+        healthReason,
         logo: item.logo,
       };
     });
@@ -95,6 +111,7 @@ function buildConnectionsData(d: ReturnType<typeof db>): ConnectionsData {
       status: "healthy" as const,
       last: "Not linked",
       health: "stale" as const,
+      healthReason: "Not linked to Plaid yet",
     }));
   }
 
