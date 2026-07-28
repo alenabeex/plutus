@@ -99,4 +99,12 @@ describe("cashflowView", () => {
     expect(v.txnCount).toBe(0);
     expect(v.expenses).toEqual([]);
   });
+
+  it("ignores disputed transactions (txn_class 'excluded')", () => {
+    txn(d, { date: "2026-07-12", name: "DISPUTED CHARGE", amount: 45, category_id: 3, txn_class: "excluded" });
+    const v = cashflowView("2026-07", d);
+    expect(v.txnCount).toBe(0);
+    expect(v.expenses).toEqual([]);
+    expect(v.totalExpenses).toBe(0);
+  });
 });

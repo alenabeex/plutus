@@ -67,4 +67,5 @@ export interface CashflowData {
   totalNeeds: number;      // for the allocation bar
   totalWants: number;
   saved: number;           // totalIncome − totalExpenses
+  categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
 }

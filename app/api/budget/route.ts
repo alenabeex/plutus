@@ -26,7 +26,10 @@ function buildCashflowData(month: string): CashflowData {
   const months = (
     d.prepare(`SELECT month FROM budget_months ORDER BY month ASC`).all() as { month: string }[]
   ).map((r) => r.month);
-  const base = { month, monthLabel: monthLabel(month), months };
+  const categories = d
+    .prepare(`SELECT id, name, COALESCE(grp,'want') grp FROM categories ORDER BY sort ASC`)
+    .all() as { id: number; name: string; grp: "need" | "want" }[];
+  const base = { month, monthLabel: monthLabel(month), months, categories };
 
   if (row.source !== "sheet") {
     const v = cashflowView(month, d);

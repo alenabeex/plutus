@@ -5,7 +5,7 @@
 // transactions) replaces editing: wrong number → fix the transaction's
 // category, not the sheet. Sheet-imported months render from stored JSON
 // with no drill-down (txns are empty).
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
@@ -40,11 +40,21 @@ function Tile({ label, value, bg, color, sub, subColor }: {
   );
 }
 
-function Row({ row, total, open, onToggle, valueColor }: {
+function Row({ row, total, open, onToggle, valueColor, categories, openTxnMenu, onToggleTxnMenu, onTxnAction }: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
+  categories: { id: number; name: string; grp: "need" | "want" }[];
+  openTxnMenu: number | null;
+  onToggleTxnMenu: (id: number) => void;
+  onTxnAction: (id: number, action: "category" | "dispute", categoryId?: number) => void;
 }) {
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
+  // Category chips exclude the category this row already belongs to. Empty
+  // for income rows (categories prop passed as [] there) and for the
+  // "Uncategorized" bucket (no real category shares that name, so nothing
+  // is excluded and every category is offered).
+  const chipCats = categories.filter((c) => c.name !== row.label);
+  const chipStyle: React.CSSProperties = { border: `1px solid ${LINE}`, color: MUTED };
   return (
     <div>
       <button
@@ -77,9 +87,49 @@ function Row({ row, total, open, onToggle, valueColor }: {
       {drillable && open && (
         <div className="mb-2 ml-3 border-l-2 pl-3" style={{ borderColor: LINE }}>
           {row.txns.map((t) => (
-            <div key={t.id} className="flex justify-between py-1 pr-8 text-xs2" style={{ color: MUTED }}>
-              <span className="truncate">{t.date.slice(5)} · {t.label}</span>
-              <span className="num">{usd(t.value)}</span>
+            <div key={t.id}>
+              <div className="flex items-center gap-3 py-1 text-xs2" style={{ color: MUTED }}>
+                <div className="flex min-w-0 flex-1 justify-between">
+                  <span className="truncate">{t.date.slice(5)} · {t.label}</span>
+                  <span className="num">{usd(t.value)}</span>
+                </div>
+                <div className="w-9 text-right">
+                  <button
+                    type="button"
+                    aria-label="Actions for this transaction"
+                    style={{ color: MUTED, cursor: "pointer" }}
+                    onClick={() => onToggleTxnMenu(t.id)}
+                  >⋯</button>
+                </div>
+                <span className="w-[15px]" aria-hidden />
+              </div>
+              {openTxnMenu === t.id && (
+                <div className="flex flex-wrap gap-1.5 py-1">
+                  {chipCats.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="rounded-full px-2.5 py-1 text-xs2"
+                      style={chipStyle}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                      onClick={() => onTxnAction(t.id, "category", c.id)}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="rounded-full px-2.5 py-1 text-xs2"
+                    style={{ ...chipStyle, borderColor: `${BAD}66`, color: BAD }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                    onClick={() => onTxnAction(t.id, "dispute")}
+                  >
+                    Disputed charge
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           <div className="py-1 text-xs2" style={{ color: MUTED }}>
@@ -98,6 +148,7 @@ export default function BudgetView({
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(true);
   const [openRow, setOpenRow] = useState<string | null>(null);
+  const [openTxnMenu, setOpenTxnMenu] = useState<number | null>(null);
 
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -109,28 +160,50 @@ export default function BudgetView({
     setFetchedMonth(month);
     setLoading(true);
     setOpenRow(null);
+    setOpenTxnMenu(null);
   }
+
+  // Fetch for the current month — also called after a transaction action
+  // (recategorize/dispute) so totals, sections, and grade recompute
+  // server-side. No client math for any of it.
+  const loadMonth = useCallback(async () => {
+    const res = await fetch(`/api/budget?month=${month}`, { credentials: "same-origin" });
+    if (res.status === 401) { onLocked(); return; }
+    if (res.status === 404) {
+      setData(null); setNotFound(true); setLoading(false); onMonthsChanged();
+      return;
+    }
+    if (!res.ok) { setLoading(false); return; }
+    const d: CashflowData = await res.json();
+    setData(d); setNotFound(false); setLoading(false);
+    onMonthsChanged();
+  }, [month, onLocked, onMonthsChanged]);
 
   // ── fetch on global month change ───────────────────────────────────────────
   useEffect(() => {
     let stale = false;
-    fetch(`/api/budget?month=${month}`, { credentials: "same-origin" })
-      .then(async (res) => {
-        if (stale) return;
-        if (res.status === 401) { onLocked(); return; }
-        if (res.status === 404) {
-          setData(null); setNotFound(true); setLoading(false); onMonthsChanged();
-          return;
-        }
-        if (!res.ok) { setLoading(false); return; }
-        const d: CashflowData = await res.json();
-        if (stale) return;
-        setData(d); setNotFound(false); setLoading(false);
-        onMonthsChanged();
-      })
-      .catch(() => { if (!stale) setLoading(false); });
+    (async () => { if (!stale) await loadMonth(); })().catch(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [month, onLocked, onMonthsChanged]);
+  }, [loadMonth]);
+
+  // Transaction actions from the drill-down ⋯ menu (spec 2026-07-28): this is
+  // the read-only page's one write path — edit the transaction, never the
+  // sheet. Close the menu, call the API, re-fetch so everything recomputes.
+  const onTxnAction = useCallback(
+    async (id: number, action: "category" | "dispute", categoryId?: number) => {
+      setOpenTxnMenu(null);
+      const body = action === "category" ? { id, action, categoryId } : { id, action };
+      const res = await fetch("/api/transactions", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      if (res.ok) await loadMonth();
+    },
+    [onLocked, loadMonth],
+  );
 
   useEffect(() => {
     if (!plusOpen) return;
@@ -227,7 +300,9 @@ export default function BudgetView({
         {data.income.map((row) => (
           <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD}
                open={openRow === `i:${row.label}`}
-               onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)} />
+               onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)}
+               categories={[]} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+               onTxnAction={onTxnAction} />
         ))}
       </div>
 
@@ -242,7 +317,9 @@ export default function BudgetView({
             {needsRows.map((row) => (
               <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
                    open={openRow === `e:${row.label}`}
-                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
+                   categories={data.categories} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+                   onTxnAction={onTxnAction} />
             ))}
           </>
         )}
@@ -252,7 +329,9 @@ export default function BudgetView({
             {wantsRows.map((row) => (
               <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
                    open={openRow === `e:${row.label}`}
-                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
+                   categories={data.categories} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+                   onTxnAction={onTxnAction} />
             ))}
           </>
         )}
