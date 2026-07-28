@@ -16,7 +16,23 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 
 ---
 
+## Open security items
+
+- **Local-access guard is claimed but not implemented.** `app/page.tsx:254`
+  shows the user "Blocked by the local access guard — open the app on
+  localhost" on any non-JSON 403, but no such guard exists server-side: there
+  is no `middleware.ts`, and no host/IP check in `lib/auth.ts` or any route.
+  Nothing restricts requests by origin host. Today the only thing keeping the
+  real instance off the internet is the port convention (tunnels point at 3000
+  = demo; real runs on 8420) plus the PIN gate — not a guard. Fix: add a
+  middleware that rejects requests whose host is not localhost/127.0.0.1/::1
+  unless an explicit opt-in env (the planned `--lan` flag) is set, and return
+  a JSON 403 so the existing client message is accurate. Raised 2026-07-27
+  after an orphaned quick-tunnel was found pointed at port 3000.
+
 ### 2026-07-27 (later)
+
+- `[OPS]` Killed an orphaned cloudflared quick-tunnel (PID 39447, up 3d5h, started by a long-finished session) that pointed at `http://127.0.0.1:3000`. It had been failing for some time — control-stream errors in a ~64s retry loop, public URL unreachable — so no live exposure at the time it was found. Target port was correct per convention: 3000 is demo (`run-dev.sh` hardcodes `FT_DEMO=${FT_DEMO:-1}`), so the real instance on 8420 was never tunnel-reachable. Audit prompted by a question about SSH/quantum hardening; noted in passing that SSH (GitHub push auth) is unrelated to Plaid/data security, and that the Mac already negotiates a post-quantum KEX with GitHub (`sntrup761x25519-sha512`) with an Ed25519 key — nothing to change there. See "Open security items" above for the real gap this surfaced.
 
 - `[FILE]` **Cash Flow read-only + Monarch layout shipped.** Spec docs/superpowers/specs/2026-07-27-cashflow-readonly-monarch-design.md, plan docs/superpowers/plans/2026-07-27-cashflow-readonly-monarch.md, executed subagent-per-task. 8 commits: vitest harness (d1ef58e), cashflowView TDD 6 tests (67d75f2), API read-only GET/CashflowData + PUT/POST deleted (67ce6ed), view rewrite — tiles/allocation bar/drill-down rows (ccc51df), typography onto product-designer type scale (5403b82), income-green/expenses-red tiles (0971329), BudgetData dropped (df8c470), row amounts color-coded (dd54383). Owner-directed mid-flight: type-scale conformance, tile + row color coding. Verified live on demo: JUL 2026 derived and reconciling to the cent, drill-down expand/collapse single-open, sheet month 2026-01 stored + chevronless, APR 2026 empty state (no CTA, points at Connections), PUT/POST 405. Editing-loss bug closed by design: page never writes.
 - `[FILE]` Post-review + owner-directed polish (fff743c): Expenses card sectioned NEEDS/WANTS (CashflowRow.grp), header renamed "Expenses", allocation bar semantic colors (needs red / wants faded red / saved green) with overspend-safe scaling + "Saved −N%" legend, savings-rate & saved tiles flip red when negative, row proportion bars colored per side, dead cashflowFromTransactions deleted. Final whole-branch review (fix-first verdict) satisfied: both Important overspend issues fixed; legacy stored-month fallback kept as spec'd (pre-migration months render read-only, chevronless — demo's JAN 2026 is one). Verified live post-fix.
