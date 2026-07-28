@@ -273,6 +273,18 @@ export default function BudgetView({
       <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} saved={data.saved} />
 
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Income</h2>
+        {data.income.length === 0 && (
+          <div className="py-3 text-body" style={{ color: MUTED }}>No income this month.</div>
+        )}
+        {data.income.map((row) => (
+          <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD}
+               open={openRow === `i:${row.label}`}
+               onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)} />
+        ))}
+      </div>
+
+      <div className="rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Expenses</h2>
         {data.expenses.length === 0 && (
           <div className="py-3 text-body" style={{ color: MUTED }}>No expenses this month.</div>
@@ -297,18 +309,6 @@ export default function BudgetView({
             ))}
           </>
         )}
-      </div>
-
-      <div className="rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Income</h2>
-        {data.income.length === 0 && (
-          <div className="py-3 text-body" style={{ color: MUTED }}>No income this month.</div>
-        )}
-        {data.income.map((row) => (
-          <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD}
-               open={openRow === `i:${row.label}`}
-               onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)} />
-        ))}
       </div>
     </div>
   );
