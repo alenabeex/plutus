@@ -88,7 +88,8 @@ function Row({ row, total, open, onToggle, valueColor, categories, openTxnMenu, 
         <div className="mb-2 ml-3 border-l-2 pl-3" style={{ borderColor: LINE }}>
           {row.txns.map((t) => (
             <div key={t.id}>
-              <div className="flex items-center gap-3 py-1 text-xs2" style={{ color: MUTED }}>
+              {/* px-1 mirrors the parent row button's padding so amounts flush-align */}
+              <div className="flex items-center gap-3 px-1 py-1 text-xs2" style={{ color: MUTED }}>
                 <div className="flex min-w-0 flex-1 justify-between">
                   <span className="truncate">{t.date.slice(5)} · {t.label}</span>
                   <span className="num">{usd(t.value)}</span>
