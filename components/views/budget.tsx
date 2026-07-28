@@ -31,8 +31,8 @@ function Tile({ label, value, accent }: { label: string; value: string; accent?:
       className="flex-1 rounded-2xl p-4"
       style={{ background: accent ? SOFT : CARD, border: `1px solid ${LINE}` }}
     >
-      <div className="text-xs mb-1" style={{ color: MUTED }}>{label}</div>
-      <div className="text-2xl font-medium" style={{ color: accent ? GOOD : INK }}>{value}</div>
+      <div className="text-xs2 mb-1" style={{ color: MUTED }}>{label}</div>
+      <div className="num text-num-lg font-extrabold" style={{ color: accent ? GOOD : INK }}>{value}</div>
     </div>
   );
 }
@@ -49,7 +49,7 @@ function AllocationBar({ needs, wants, income }: { needs: number; wants: number;
   ].filter((s) => s.w > 0);
   return (
     <div className="mb-6">
-      <div className="text-xs mb-2" style={{ color: MUTED }}>Where this month&apos;s income went</div>
+      <div className="text-xs2 mb-2" style={{ color: MUTED }}>Where this month&apos;s income went</div>
       <div className="flex h-3 overflow-hidden rounded-full" role="img"
            aria-label={seg.map((s) => s.label).join(", ")}>
         {seg.map((s) => (
@@ -58,7 +58,7 @@ function AllocationBar({ needs, wants, income }: { needs: number; wants: number;
       </div>
       <div className="mt-2 flex flex-wrap gap-4">
         {seg.map((s) => (
-          <span key={s.label} className="flex items-center gap-1.5 text-xs" style={{ color: MUTED }}>
+          <span key={s.label} className="flex items-center gap-1.5 text-xs2" style={{ color: MUTED }}>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color }} />
             {s.label}
           </span>
@@ -85,15 +85,15 @@ function Row({ row, total, open, onToggle }: {
         disabled={!drillable}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex justify-between text-sm" style={{ color: INK }}>
+          <div className="flex justify-between text-sm2" style={{ color: INK }}>
             <span className="truncate">{row.label}</span>
-            <span>{usd(row.value)}</span>
+            <span className="num font-semibold">{usd(row.value)}</span>
           </div>
           <div className="mt-1.5 h-1 rounded-full" style={{ background: SOFT }}>
             <div className="h-1 rounded-full" style={{ width: `${share}%`, background: MUTED }} />
           </div>
         </div>
-        <span className="w-9 text-right text-xs" style={{ color: MUTED }}>{share}%</span>
+        <span className="num w-9 text-right text-xs2" style={{ color: MUTED }}>{share}%</span>
         {drillable ? (
           open
             ? <ChevronDown size={15} style={{ color: MUTED }} aria-hidden />
@@ -105,12 +105,12 @@ function Row({ row, total, open, onToggle }: {
       {drillable && open && (
         <div className="mb-2 ml-3 border-l-2 pl-3" style={{ borderColor: LINE }}>
           {row.txns.map((t) => (
-            <div key={t.id} className="flex justify-between py-1 pr-8 text-xs" style={{ color: MUTED }}>
+            <div key={t.id} className="flex justify-between py-1 pr-8 text-xs2" style={{ color: MUTED }}>
               <span className="truncate">{t.date.slice(5)} · {t.label}</span>
-              <span>{usd(t.value)}</span>
+              <span className="num">{usd(t.value)}</span>
             </div>
           ))}
-          <div className="py-1 text-xs" style={{ color: MUTED }}>
+          <div className="py-1 text-xs2" style={{ color: MUTED }}>
             Wrong category? Fix it on the transaction.
           </div>
         </div>
@@ -172,12 +172,12 @@ export default function BudgetView({
   const menuItem: React.CSSProperties = {
     all: "unset" as unknown as undefined,
     display: "block", width: "100%", boxSizing: "border-box",
-    padding: "9px 12px", borderRadius: 10, fontSize: 13.5, color: INK, cursor: "pointer",
+    padding: "9px 12px", borderRadius: 10, fontSize: 13, color: INK, cursor: "pointer",
   };
 
   const header = (
     <div className="mb-5 flex items-center justify-between">
-      <h1 className="text-2xl font-semibold" style={{ color: INK }}>Cash Flow</h1>
+      <h1 className="text-h1 font-extrabold" style={{ color: INK }}>Cash Flow</h1>
       <MonthPicker month={month} onChange={onMonthChange} dataMonths={dataMonths} min={monthMin} max={monthMax}>
         <div ref={plusRef} className="relative">
           <button
@@ -212,7 +212,7 @@ export default function BudgetView({
   );
 
   if (loading) {
-    return <div>{header}<div className="p-10 text-sm" style={{ color: MUTED }}>Loading…</div></div>;
+    return <div>{header}<div className="p-10 text-body" style={{ color: MUTED }}>Loading…</div></div>;
   }
 
   if (notFound || !data) {
@@ -220,8 +220,8 @@ export default function BudgetView({
       <div>
         {header}
         <div className="rounded-2xl p-10 text-center" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-          <div className="text-sm" style={{ color: INK }}>Nothing here yet.</div>
-          <div className="mx-auto mt-2 max-w-md text-sm" style={{ color: MUTED }}>
+          <div className="text-body" style={{ color: INK }}>Nothing here yet.</div>
+          <div className="mx-auto mt-2 max-w-md text-body" style={{ color: MUTED }}>
             Cash Flow builds itself from your transactions — there&apos;s nothing to set up.
             Link an account under Connections and this month fills in on the next sync.
           </div>
@@ -246,9 +246,9 @@ export default function BudgetView({
       <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} />
 
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <div className="mb-1 text-xs" style={{ color: MUTED }}>Expenses by category</div>
+        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Expenses by category</h2>
         {data.expenses.length === 0 && (
-          <div className="py-3 text-sm" style={{ color: MUTED }}>No expenses this month.</div>
+          <div className="py-3 text-body" style={{ color: MUTED }}>No expenses this month.</div>
         )}
         {data.expenses.map((row) => (
           <Row key={row.label} row={row} total={data.totalExpenses}
@@ -258,9 +258,9 @@ export default function BudgetView({
       </div>
 
       <div className="rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <div className="mb-1 text-xs" style={{ color: MUTED }}>Income</div>
+        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Income</h2>
         {data.income.length === 0 && (
-          <div className="py-3 text-sm" style={{ color: MUTED }}>No income this month.</div>
+          <div className="py-3 text-body" style={{ color: MUTED }}>No income this month.</div>
         )}
         {data.income.map((row) => (
           <Row key={row.label} row={row} total={data.totalIncome}
