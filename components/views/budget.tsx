@@ -40,57 +40,6 @@ function Tile({ label, value, bg, color, sub, subColor }: {
   );
 }
 
-function AllocationBar({ needs, wants, income, saved }: { needs: number; wants: number; income: number; saved: number }) {
-  if (income <= 0) return null;
-  const needsPct = pct(needs, income);
-  const wantsPct = pct(wants, income);
-  const overspend = saved < 0;
-
-  // Bar fill: needs/wants always semantic BAD (wants dimmed); saved GOOD.
-  // Overspend (needs+wants > 100%) scales the two spend segments to fill the
-  // bar exactly — no clipping — and drops the Saved segment from the bar.
-  const bar = overspend
-    ? (() => {
-        const scale = 100 / (needsPct + wantsPct);
-        return [
-          { label: `Needs ${needsPct}%`, w: needsPct * scale, color: BAD },
-          { label: `Wants ${wantsPct}%`, w: wantsPct * scale, color: BAD, opacity: 0.45 },
-        ];
-      })()
-    : [
-        { label: `Needs ${needsPct}%`, w: needsPct, color: BAD },
-        { label: `Wants ${wantsPct}%`, w: wantsPct, color: BAD, opacity: 0.45 },
-        { label: `Saved ${Math.max(0, 100 - needsPct - wantsPct)}%`, w: Math.max(0, 100 - needsPct - wantsPct), color: GOOD },
-      ];
-  const barSeg = bar.filter((s) => s.w > 0);
-
-  // Legend always names all three buckets; overspend gets a true negative
-  // Saved percentage instead of the (absent) bar segment.
-  const legend = overspend
-    ? [...barSeg, { label: `Saved −${Math.abs(pct(saved, income))}%`, w: 0, color: BAD, opacity: 1 }]
-    : barSeg;
-
-  return (
-    <div className="mb-6">
-      <div className="text-xs2 mb-2" style={{ color: MUTED }}>Where this month&apos;s income went</div>
-      <div className="flex h-3 overflow-hidden rounded-full" role="img"
-           aria-label={legend.map((s) => s.label).join(", ")}>
-        {barSeg.map((s) => (
-          <div key={s.label} style={{ width: `${s.w}%`, background: s.color, opacity: s.opacity ?? 1 }} />
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-4">
-        {legend.map((s) => (
-          <span key={s.label} className="flex items-center gap-1.5 text-xs2" style={{ color: MUTED }}>
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color, opacity: s.opacity ?? 1 }} />
-            {s.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Row({ row, total, open, onToggle, valueColor }: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
 }) {
@@ -262,15 +211,13 @@ export default function BudgetView({
     <div>
       {header}
 
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row">
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
         <Tile label="Saved" value={usd(data.saved)} color={data.saved < 0 ? BAD : INK} />
         <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={gradeBg}
               color={gradeColor} sub={grade === "—" ? undefined : grade} subColor={gradeColor} />
       </div>
-
-      <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} saved={data.saved} />
 
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Income</h2>
