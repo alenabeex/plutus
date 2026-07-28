@@ -32,6 +32,10 @@ export async function POST(req: NextRequest) {
     optional_products: optionalProducts,
     country_codes: [CountryCode.Us],
     language: "en",
+    // Full two-year history at link time (Plaid default is only 90 days and
+    // it can't be raised later without re-linking). Depth doesn't change
+    // Transactions billing — it's a flat per-Item subscription.
+    transactions: { days_requested: 730 },
   });
 
   return withRefreshedSession(req, { link_token: linkRes.data.link_token });
