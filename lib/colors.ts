@@ -22,7 +22,7 @@ export const WARN = "#8a6410";
 // a tint for the tile background; every pairing clears AA (4.5:1):
 // GREAT 8.27:1, GOOD 4.73:1, OKAY 4.71:1, BAD 4.61:1 on its own tint.
 export const GREAT = "#1f4d30";
-export const TINT_GREAT = "#e6efe9";
-export const TINT_GOOD = "#e9f2ec";
+export const TINT_GREAT = "#d2f3e0";
+export const TINT_GOOD = "#dcf3e5";
 export const TINT_WARN = "#f7f0da";
 export const TINT_BAD = "#f9eae7";

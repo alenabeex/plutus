@@ -97,7 +97,7 @@ function Row({ row, total, open, onToggle, valueColor }: {
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
   return (
-    <div style={{ borderTop: `1px solid ${LINE}` }}>
+    <div>
       <button
         type="button"
         className="flex w-full items-center gap-3 px-1 py-2.5 text-left"

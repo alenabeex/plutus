@@ -38,8 +38,8 @@ export function gradeFor(
   if (totalIncome <= 0) return { grade: "—", gradeColor: "#686d76", gradeBg: "#eef0f3" };
   if (savings < 0) return { grade: "Very Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
   const ratio = totalVariable / totalIncome;
-  if (ratio < 0.15) return { grade: "Great", gradeColor: GREATC, gradeBg: "#e6efe9" };
-  if (ratio < 0.20) return { grade: "Good", gradeColor: GOODC, gradeBg: "#e9f2ec" };
+  if (ratio < 0.15) return { grade: "Great", gradeColor: GREATC, gradeBg: "#d2f3e0" };
+  if (ratio < 0.20) return { grade: "Good", gradeColor: GOODC, gradeBg: "#dcf3e5" };
   if (ratio < 0.25) return { grade: "Okay", gradeColor: "#8a6410", gradeBg: "#f7f0da" };
   if (ratio < 0.30) return { grade: "Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
   return { grade: "Very Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
