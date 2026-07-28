@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
-import { usd } from "@/lib/format";
+import { usd, gradeFor } from "@/lib/format";
 import type { CashflowData, CashflowRow } from "@/lib/types";
 
 interface BudgetViewProps {
@@ -25,7 +25,9 @@ interface BudgetViewProps {
 const pct = (part: number, total: number) =>
   total > 0 ? Math.round((part / total) * 100) : 0;
 
-function Tile({ label, value, bg, color }: { label: string; value: string; bg?: string; color?: string }) {
+function Tile({ label, value, bg, color, sub, subColor }: {
+  label: string; value: string; bg?: string; color?: string; sub?: string; subColor?: string;
+}) {
   return (
     <div
       className="flex-1 rounded-2xl p-4"
@@ -33,6 +35,7 @@ function Tile({ label, value, bg, color }: { label: string; value: string; bg?: 
     >
       <div className="text-xs2 mb-1" style={{ color: MUTED }}>{label}</div>
       <div className="num text-num-lg font-extrabold" style={{ color: color ?? INK }}>{value}</div>
+      {sub && <div className="text-xs2 mt-0.5" style={{ color: subColor ?? MUTED }}>{sub}</div>}
     </div>
   );
 }
@@ -251,6 +254,7 @@ export default function BudgetView({
   }
 
   const rate = data.totalIncome > 0 ? pct(data.saved, data.totalIncome) : null;
+  const { grade, gradeColor } = gradeFor(data.totalIncome, data.totalWants, data.saved);
   const needsRows = data.expenses.filter((e) => e.grp === "need");
   const wantsRows = data.expenses.filter((e) => e.grp !== "need");
 
@@ -263,7 +267,7 @@ export default function BudgetView({
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
         <Tile label="Saved" value={usd(data.saved)} color={data.saved < 0 ? BAD : INK} />
         <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={SOFT}
-              color={rate !== null && rate < 0 ? BAD : GOOD} />
+              color={gradeColor} sub={grade === "—" ? undefined : grade} subColor={gradeColor} />
       </div>
 
       <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} saved={data.saved} />
