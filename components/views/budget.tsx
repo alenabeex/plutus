@@ -254,7 +254,7 @@ export default function BudgetView({
   }
 
   const rate = data.totalIncome > 0 ? pct(data.saved, data.totalIncome) : null;
-  const { grade, gradeColor } = gradeFor(data.totalIncome, data.totalWants, data.saved);
+  const { grade, gradeColor, gradeBg } = gradeFor(data.totalIncome, data.totalWants, data.saved);
   const needsRows = data.expenses.filter((e) => e.grp === "need");
   const wantsRows = data.expenses.filter((e) => e.grp !== "need");
 
@@ -266,7 +266,7 @@ export default function BudgetView({
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
         <Tile label="Saved" value={usd(data.saved)} color={data.saved < 0 ? BAD : INK} />
-        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={SOFT}
+        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={gradeBg}
               color={gradeColor} sub={grade === "—" ? undefined : grade} subColor={gradeColor} />
       </div>
 

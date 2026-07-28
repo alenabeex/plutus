@@ -21,24 +21,26 @@ export const isValidMonthKey = (m: unknown): m is string =>
 
 /** Budget grade from the variable/income ratio, with the two guard cases a
  *  ratio alone can't express. Single source — was reimplemented three times
- *  with drifting edge behavior (audit P2). Colors: GOOD green, BAD red,
- *  --warn yellow; "—" when the month has no income yet. */
+ *  with drifting edge behavior (audit P2). Colors: GREAT deep green, GOOD
+ *  green, OKAY amber, BAD/Very Bad red; "—" when the month has no income yet. */
 export function gradeFor(
   totalIncome: number,
   totalVariable: number,
   savings: number,
-): { grade: string; gradeColor: string } {
+): { grade: string; gradeColor: string; gradeBg: string } {
   // Raw hex, not var(--good) etc — those names collide with shadcn's theme
   // variables, so a var()-with-fallback silently resolves to the WRONG value.
-  // Kept in step with lib/colors.ts — all AA-safe (4.5:1) on white/#f2f3f5.
+  // Kept in step with lib/colors.ts (GREAT/GOOD/WARN/BAD + their TINT_*
+  // backgrounds) — all AA-safe (4.5:1) on white/#f2f3f5 and on their own tint.
+  const GREATC = "#1f4d30";
   const GOODC = "#3b764e";
   const BADC = "#b04a3f";
-  if (totalIncome <= 0) return { grade: "—", gradeColor: "#686d76" };
-  if (savings < 0) return { grade: "Very Bad", gradeColor: BADC };
+  if (totalIncome <= 0) return { grade: "—", gradeColor: "#686d76", gradeBg: "#eef0f3" };
+  if (savings < 0) return { grade: "Very Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
   const ratio = totalVariable / totalIncome;
-  if (ratio < 0.15) return { grade: "Great", gradeColor: GOODC };
-  if (ratio < 0.20) return { grade: "Good", gradeColor: GOODC };
-  if (ratio < 0.25) return { grade: "Okay", gradeColor: "#8a6410" };
-  if (ratio < 0.30) return { grade: "Bad", gradeColor: BADC };
-  return { grade: "Very Bad", gradeColor: BADC };
+  if (ratio < 0.15) return { grade: "Great", gradeColor: GREATC, gradeBg: "#e6efe9" };
+  if (ratio < 0.20) return { grade: "Good", gradeColor: GOODC, gradeBg: "#e9f2ec" };
+  if (ratio < 0.25) return { grade: "Okay", gradeColor: "#8a6410", gradeBg: "#f7f0da" };
+  if (ratio < 0.30) return { grade: "Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
+  return { grade: "Very Bad", gradeColor: BADC, gradeBg: "#f9eae7" };
 }

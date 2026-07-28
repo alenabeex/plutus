@@ -17,3 +17,12 @@ export const BAD = "#b04a3f";
 // semantics; the traffic-light dot on Connections reuses green/red and
 // adds this for the in-between state.
 export const WARN = "#8a6410";
+// Grade scale (Cash Flow savings-rate tile). GREAT is a deeper green than
+// GOOD so the top tier reads as distinct, not just "green again". Each has
+// a tint for the tile background; every pairing clears AA (4.5:1):
+// GREAT 8.27:1, GOOD 4.73:1, OKAY 4.71:1, BAD 4.61:1 on its own tint.
+export const GREAT = "#1f4d30";
+export const TINT_GREAT = "#e6efe9";
+export const TINT_GOOD = "#e9f2ec";
+export const TINT_WARN = "#f7f0da";
+export const TINT_BAD = "#f9eae7";
