@@ -68,8 +68,8 @@ function AllocationBar({ needs, wants, income }: { needs: number; wants: number;
   );
 }
 
-function Row({ row, total, open, onToggle }: {
-  row: CashflowRow; total: number; open: boolean; onToggle: () => void;
+function Row({ row, total, open, onToggle, valueColor }: {
+  row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
 }) {
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
@@ -87,7 +87,7 @@ function Row({ row, total, open, onToggle }: {
         <div className="min-w-0 flex-1">
           <div className="flex justify-between text-sm2" style={{ color: INK }}>
             <span className="truncate">{row.label}</span>
-            <span className="num font-semibold">{usd(row.value)}</span>
+            <span className="num font-semibold" style={{ color: valueColor }}>{usd(row.value)}</span>
           </div>
           <div className="mt-1.5 h-1 rounded-full" style={{ background: SOFT }}>
             <div className="h-1 rounded-full" style={{ width: `${share}%`, background: MUTED }} />
@@ -251,7 +251,7 @@ export default function BudgetView({
           <div className="py-3 text-body" style={{ color: MUTED }}>No expenses this month.</div>
         )}
         {data.expenses.map((row) => (
-          <Row key={row.label} row={row} total={data.totalExpenses}
+          <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
                open={openRow === `e:${row.label}`}
                onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
         ))}
@@ -263,7 +263,7 @@ export default function BudgetView({
           <div className="py-3 text-body" style={{ color: MUTED }}>No income this month.</div>
         )}
         {data.income.map((row) => (
-          <Row key={row.label} row={row} total={data.totalIncome}
+          <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD}
                open={openRow === `i:${row.label}`}
                onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)} />
         ))}
