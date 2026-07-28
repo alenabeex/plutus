@@ -68,4 +68,5 @@ export interface CashflowData {
   totalWants: number;
   saved: number;           // totalIncome − totalExpenses
   categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
+  txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }

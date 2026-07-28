@@ -52,6 +52,11 @@ export default function Home() {
   const [month, setMonth] = useState<string>(nowMonth());
   // Months that have cash-flow sheets (for the picker's data dots)
   const [dataMonths, setDataMonths] = useState<string[]>([]);
+  // Earliest month with real settled transactions — may be earlier than any
+  // dataMonths[0] entry, since backfill months sit gated behind Sync Month
+  // (spec 2026-07-28) until synced. Without this the nav can never reach
+  // them at all.
+  const [txnMonthMin, setTxnMonthMin] = useState<string | null>(null);
 
   // Once the user picks a month via the picker, their choice wins — no
   // further auto-snapping. The snap itself runs at most once, on the first
@@ -62,8 +67,9 @@ export default function Home() {
   const refreshMonths = useCallback(() => {
     fetch("/api/budget", { credentials: "same-origin" })
       .then((r) => r.json())
-      .then((j: { months?: string[] }) => {
+      .then((j: { months?: string[]; txnMonthMin?: string | null }) => {
         if (Array.isArray(j.months)) setDataMonths(j.months);
+        setTxnMonthMin(j.txnMonthMin ?? null);
       })
       .catch(() => {});
   }, []);
@@ -117,8 +123,14 @@ export default function Home() {
   };
   const onLocked = useCallback(() => setPinState("locked"), []);
 
-  // navigation clamp: earliest data month ↔ TODAY's month. No future months.
-  const monthMin = dataMonths.length && dataMonths[0] < nowMonth() ? dataMonths[0] : nowMonth();
+  // navigation clamp: earliest reachable month ↔ TODAY's month. No future
+  // months. "Earliest reachable" is the earlier of dataMonths[0] (synced
+  // months) and txnMonthMin (real settled txns, including gated backfill
+  // months not yet synced) — without txnMonthMin here, ‹ could never reach
+  // a gated month to sync it in the first place.
+  const earliestCandidates = [dataMonths[0], txnMonthMin ?? undefined]
+    .filter((m): m is string => !!m && m < nowMonth());
+  const monthMin = earliestCandidates.length ? earliestCandidates.sort()[0] : nowMonth();
   const monthMax = nowMonth();
 
   if (pinState !== "unlocked") {

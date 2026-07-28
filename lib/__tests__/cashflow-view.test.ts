@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
-import { cashflowView } from "../derive";
+import { cashflowView, ensureMonthsFromTransactions } from "../derive";
 
 function makeDb(): Database.Database {
   const d = new Database(":memory:");
@@ -14,6 +14,7 @@ function makeDb(): Database.Database {
       amount REAL, category_id INTEGER, pending INTEGER DEFAULT 0,
       txn_class TEXT
     );
+    CREATE TABLE budget_months (month TEXT PRIMARY KEY);
   `);
   const cat = d.prepare(`INSERT INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
   cat.run("Rent / Housing", 1, "need");
@@ -106,5 +107,29 @@ describe("cashflowView", () => {
     expect(v.txnCount).toBe(0);
     expect(v.expenses).toEqual([]);
     expect(v.totalExpenses).toBe(0);
+  });
+});
+
+describe("ensureMonthsFromTransactions", () => {
+  let d: Database.Database;
+  beforeEach(() => { d = makeDb(); });
+
+  it("only materializes the current month from a multi-month backfill", () => {
+    txn(d, { date: "2026-05-01", name: "OLD", amount: 10, category_id: 3 });
+    txn(d, { date: "2026-06-01", name: "OLDER", amount: 10, category_id: 3 });
+    txn(d, { date: "2026-07-01", name: "CURRENT", amount: 10, category_id: 3 });
+    ensureMonthsFromTransactions(d, "2026-07");
+    const rows = (d.prepare(`SELECT month FROM budget_months ORDER BY month`).all() as { month: string }[])
+      .map((r) => r.month);
+    expect(rows).toEqual(["2026-07"]);
+  });
+
+  it("grandfathers an existing past-month row", () => {
+    d.prepare(`INSERT INTO budget_months (month) VALUES (?)`).run("2026-05");
+    txn(d, { date: "2026-07-01", name: "CURRENT", amount: 10, category_id: 3 });
+    ensureMonthsFromTransactions(d, "2026-07");
+    const rows = (d.prepare(`SELECT month FROM budget_months ORDER BY month`).all() as { month: string }[])
+      .map((r) => r.month);
+    expect(rows).toEqual(["2026-05", "2026-07"]);
   });
 });

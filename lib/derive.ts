@@ -161,15 +161,22 @@ export function categorizeTransactions(d: Database.Database = db()): number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Months materialize from transaction dates (plan T4.4): any settled month
- *  seen in the ledger gets a budget_months row so the view can render it —
- *  no month-new ritual. Existing rows untouched. */
-export function ensureMonthsFromTransactions(d: Database.Database = db()): void {
+/** Months materialize from transaction dates (plan T4.4), but ONLY the
+ *  current month auto-materializes (spec 2026-07-28). Deep backfill (730-day
+ *  history at link time) would otherwise dump ~24 months of never-reviewed
+ *  data into Cash Flow as if it were settled — past months from backfill sit
+ *  gated behind the explicit "Sync Month" action instead, so history never
+ *  appears pre-reviewed. Existing budget_months rows (grandfathered) and the
+ *  live month are untouched/always materialized respectively. */
+export function ensureMonthsFromTransactions(
+  d: Database.Database = db(),
+  nowMonth: string = new Date().toISOString().slice(0, 7),
+): void {
   const months = d.prepare(
     `SELECT DISTINCT substr(date, 1, 7) m FROM transactions WHERE pending = 0 AND date IS NOT NULL`,
   ).all() as { m: string }[];
   const ins = d.prepare(`INSERT OR IGNORE INTO budget_months (month) VALUES (?)`);
-  for (const { m } of months) if (/^\d{4}-\d{2}$/.test(m)) ins.run(m);
+  for (const { m } of months) if (/^\d{4}-\d{2}$/.test(m) && m >= nowMonth) ins.run(m);
 }
 
 /* ── recurring detection (plan T5.1) ────────────────────────────────────── */

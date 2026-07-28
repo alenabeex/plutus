@@ -150,6 +150,12 @@ export default function BudgetView({
   const [loading, setLoading] = useState(true);
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [openTxnMenu, setOpenTxnMenu] = useState<number | null>(null);
+  // >0 when the requested month has real settled transactions but isn't
+  // synced yet (spec 2026-07-28's backfill gate) — the notFound render forks
+  // on this to offer "Sync Month" instead of the generic empty state.
+  const [gatedTxnCount, setGatedTxnCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -162,6 +168,8 @@ export default function BudgetView({
     setLoading(true);
     setOpenRow(null);
     setOpenTxnMenu(null);
+    setGatedTxnCount(0);
+    setSyncError(null);
   }
 
   // Fetch for the current month — also called after a transaction action
@@ -171,13 +179,43 @@ export default function BudgetView({
     const res = await fetch(`/api/budget?month=${month}`, { credentials: "same-origin" });
     if (res.status === 401) { onLocked(); return; }
     if (res.status === 404) {
-      setData(null); setNotFound(true); setLoading(false); onMonthsChanged();
+      const body = await res.json().catch(() => ({}) as { gatedTxnCount?: number });
+      setData(null); setNotFound(true); setGatedTxnCount(body.gatedTxnCount ?? 0); setLoading(false);
+      onMonthsChanged();
       return;
     }
     if (!res.ok) { setLoading(false); return; }
     const d: CashflowData = await res.json();
-    setData(d); setNotFound(false); setLoading(false);
+    setData(d); setNotFound(false); setGatedTxnCount(0); setLoading(false);
     onMonthsChanged();
+  }, [month, onLocked, onMonthsChanged]);
+
+  // "Sync Month" — un-gates a backfill month by explicit choice (spec
+  // 2026-07-28). Server re-validates everything; this just calls the action
+  // and renders whatever comes back, same as any other write path here.
+  const onSyncMonth = useCallback(async () => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const res = await fetch("/api/budget", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync-month", month }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setData(body as CashflowData); setNotFound(false); setGatedTxnCount(0);
+        onMonthsChanged();
+        return;
+      }
+      setSyncError(typeof body.error === "string" ? body.error : "Couldn't sync this month");
+    } catch {
+      setSyncError("Couldn't reach the app server");
+    } finally {
+      setSyncing(false);
+    }
   }, [month, onLocked, onMonthsChanged]);
 
   // ── fetch on global month change ───────────────────────────────────────────
@@ -262,6 +300,30 @@ export default function BudgetView({
   }
 
   if (notFound || !data) {
+    if (gatedTxnCount > 0) {
+      return (
+        <div>
+          {header}
+          <div className="rounded-2xl p-10 text-center" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+            <div className="text-body" style={{ color: INK }}>This month has history waiting.</div>
+            <div className="mx-auto mt-2 max-w-md text-body" style={{ color: MUTED }}>
+              {gatedTxnCount} transactions from your linked accounts are ready. Sync this month to
+              build it — unsynced months never count against you.
+            </div>
+            <button
+              type="button"
+              className="mt-4 rounded-full px-5 py-2.5 text-sm2 font-semibold"
+              style={{ background: INK, color: "#fff", cursor: syncing ? "default" : "pointer", opacity: syncing ? 0.6 : 1 }}
+              disabled={syncing}
+              onClick={onSyncMonth}
+            >
+              {syncing ? "Syncing…" : "Sync Month"}
+            </button>
+            {syncError && <div className="mt-2 text-xs2" style={{ color: MUTED }}>{syncError}</div>}
+          </div>
+        </div>
+      );
+    }
     return (
       <div>
         {header}
