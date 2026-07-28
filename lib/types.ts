@@ -52,6 +52,7 @@ export interface CashflowRow {
   label: string;          // category (expenses) or payer (income)
   value: number;
   txns: CashflowTxn[];    // empty for stored/sheet months → no drill-down
+  grp?: "need" | "want";  // expense rows only — income rows omit this key
 }
 
 export interface CashflowData {

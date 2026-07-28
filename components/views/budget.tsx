@@ -37,29 +37,49 @@ function Tile({ label, value, bg, color }: { label: string; value: string; bg?: 
   );
 }
 
-function AllocationBar({ needs, wants, income }: { needs: number; wants: number; income: number }) {
+function AllocationBar({ needs, wants, income, saved }: { needs: number; wants: number; income: number; saved: number }) {
   if (income <= 0) return null;
   const needsPct = pct(needs, income);
   const wantsPct = pct(wants, income);
-  const savedPct = Math.max(0, 100 - needsPct - wantsPct);
-  const seg = [
-    { label: `Needs ${needsPct}%`, w: needsPct, color: INK },
-    { label: `Wants ${wantsPct}%`, w: wantsPct, color: MUTED },
-    { label: `Saved ${savedPct}%`, w: savedPct, color: GOOD },
-  ].filter((s) => s.w > 0);
+  const overspend = saved < 0;
+
+  // Bar fill: needs/wants always semantic BAD (wants dimmed); saved GOOD.
+  // Overspend (needs+wants > 100%) scales the two spend segments to fill the
+  // bar exactly — no clipping — and drops the Saved segment from the bar.
+  const bar = overspend
+    ? (() => {
+        const scale = 100 / (needsPct + wantsPct);
+        return [
+          { label: `Needs ${needsPct}%`, w: needsPct * scale, color: BAD },
+          { label: `Wants ${wantsPct}%`, w: wantsPct * scale, color: BAD, opacity: 0.45 },
+        ];
+      })()
+    : [
+        { label: `Needs ${needsPct}%`, w: needsPct, color: BAD },
+        { label: `Wants ${wantsPct}%`, w: wantsPct, color: BAD, opacity: 0.45 },
+        { label: `Saved ${Math.max(0, 100 - needsPct - wantsPct)}%`, w: Math.max(0, 100 - needsPct - wantsPct), color: GOOD },
+      ];
+  const barSeg = bar.filter((s) => s.w > 0);
+
+  // Legend always names all three buckets; overspend gets a true negative
+  // Saved percentage instead of the (absent) bar segment.
+  const legend = overspend
+    ? [...barSeg, { label: `Saved −${Math.abs(pct(saved, income))}%`, w: 0, color: BAD, opacity: 1 }]
+    : barSeg;
+
   return (
     <div className="mb-6">
       <div className="text-xs2 mb-2" style={{ color: MUTED }}>Where this month&apos;s income went</div>
       <div className="flex h-3 overflow-hidden rounded-full" role="img"
-           aria-label={seg.map((s) => s.label).join(", ")}>
-        {seg.map((s) => (
-          <div key={s.label} style={{ width: `${s.w}%`, background: s.color }} />
+           aria-label={legend.map((s) => s.label).join(", ")}>
+        {barSeg.map((s) => (
+          <div key={s.label} style={{ width: `${s.w}%`, background: s.color, opacity: s.opacity ?? 1 }} />
         ))}
       </div>
       <div className="mt-2 flex flex-wrap gap-4">
-        {seg.map((s) => (
+        {legend.map((s) => (
           <span key={s.label} className="flex items-center gap-1.5 text-xs2" style={{ color: MUTED }}>
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color }} />
+            <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color, opacity: s.opacity ?? 1 }} />
             {s.label}
           </span>
         ))}
@@ -90,7 +110,7 @@ function Row({ row, total, open, onToggle, valueColor }: {
             <span className="num font-semibold" style={{ color: valueColor }}>{usd(row.value)}</span>
           </div>
           <div className="mt-1.5 h-1 rounded-full" style={{ background: SOFT }}>
-            <div className="h-1 rounded-full" style={{ width: `${share}%`, background: MUTED }} />
+            <div className="h-1 rounded-full" style={{ width: `${share}%`, background: valueColor }} />
           </div>
         </div>
         <span className="num w-9 text-right text-xs2" style={{ color: MUTED }}>{share}%</span>
@@ -231,6 +251,8 @@ export default function BudgetView({
   }
 
   const rate = data.totalIncome > 0 ? pct(data.saved, data.totalIncome) : null;
+  const needsRows = data.expenses.filter((e) => e.grp === "need");
+  const wantsRows = data.expenses.filter((e) => e.grp !== "need");
 
   return (
     <div>
@@ -239,22 +261,38 @@ export default function BudgetView({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row">
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
-        <Tile label="Saved" value={usd(data.saved)} />
-        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={SOFT} color={GOOD} />
+        <Tile label="Saved" value={usd(data.saved)} color={data.saved < 0 ? BAD : INK} />
+        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={SOFT}
+              color={rate !== null && rate < 0 ? BAD : GOOD} />
       </div>
 
-      <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} />
+      <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} saved={data.saved} />
 
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Expenses by category</h2>
+        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Expenses</h2>
         {data.expenses.length === 0 && (
           <div className="py-3 text-body" style={{ color: MUTED }}>No expenses this month.</div>
         )}
-        {data.expenses.map((row) => (
-          <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
-               open={openRow === `e:${row.label}`}
-               onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
-        ))}
+        {needsRows.length > 0 && (
+          <>
+            <div className="text-label mt-0 mb-1" style={{ color: MUTED }}>NEEDS</div>
+            {needsRows.map((row) => (
+              <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
+                   open={openRow === `e:${row.label}`}
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
+            ))}
+          </>
+        )}
+        {wantsRows.length > 0 && (
+          <>
+            <div className={`text-label mb-1 ${needsRows.length > 0 ? "mt-4" : "mt-0"}`} style={{ color: MUTED }}>WANTS</div>
+            {wantsRows.map((row) => (
+              <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
+                   open={openRow === `e:${row.label}`}
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)} />
+            ))}
+          </>
+        )}
       </div>
 
       <div className="rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>

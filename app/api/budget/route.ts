@@ -41,13 +41,14 @@ function buildCashflowData(month: string): CashflowData {
     }
   }
 
-  const noTxns = (r: { label: string; value: number }): CashflowRow => ({ ...r, txns: [] });
-  const income = (JSON.parse(row.income_json) as { label: string; value: number }[]).map(noTxns);
+  const noTxns = (r: { label: string; value: number }, grp?: "need" | "want"): CashflowRow =>
+    ({ ...r, txns: [], ...(grp ? { grp } : {}) });
+  const income = (JSON.parse(row.income_json) as { label: string; value: number }[]).map((r) => noTxns(r));
   const fixed = (
     d.prepare(`SELECT label, amount FROM budget_fixed_items WHERE month = ? ORDER BY sort ASC`)
       .all(month) as { label: string; amount: number }[]
-  ).map((f) => noTxns({ label: f.label, value: f.amount }));
-  const variable = (JSON.parse(row.variable_json) as { label: string; value: number }[]).map(noTxns);
+  ).map((f) => noTxns({ label: f.label, value: f.amount }, "need"));
+  const variable = (JSON.parse(row.variable_json) as { label: string; value: number }[]).map((r) => noTxns(r, "want"));
   const expenses = [...fixed, ...variable]
     .filter((e) => e.value !== 0)
     .sort((a, b) => b.value - a.value);

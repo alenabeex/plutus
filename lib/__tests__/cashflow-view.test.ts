@@ -45,6 +45,8 @@ describe("cashflowView", () => {
     const v = cashflowView("2026-07", d);
     expect(v.expenses.map((e) => e.label)).toEqual(["Rent / Housing", "Groceries"]);
     expect(v.expenses[1].value).toBe(175.45);
+    expect(v.expenses[0].grp).toBe("need");
+    expect(v.expenses[1].grp).toBe("want");
   });
 
   it("carries each row's transactions, newest first, merchant preferred over name", () => {
@@ -62,6 +64,7 @@ describe("cashflowView", () => {
     expect(v.expenses).toHaveLength(1);
     expect(v.expenses[0].label).toBe("Uncategorized");
     expect(v.expenses[0].value).toBe(66.5);
+    expect(v.expenses[0].grp).toBe("want");
   });
 
   it("splits needs and wants totals by category group (uncategorized counts as want)", () => {

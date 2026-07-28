@@ -161,77 +161,6 @@ export function categorizeTransactions(d: Database.Database = db()): number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export interface DerivedCashflow {
-  income: { label: string; value: number }[];
-  totalIncome: number;
-  needs: { label: string; value: number }[];   // itemized per merchant (bills read as bills)
-  totalNeeds: number;
-  wants: { label: string; value: number }[];   // per want-category (+ Uncategorized line)
-  totalWants: number;
-  savings: number;                              // income − needs − wants
-  txnCount: number;                             // classified income+expense txns this month
-  uncategorized: number;                        // expense txns with no category yet
-}
-
-/** Everything Cash Flow needs for one month ('2026-07'), straight from
- *  classified transactions. Plaid convention: positive = money out.
- *  Transfers (CC payments, own-account moves) are already excluded by
- *  txn_class. Uncategorized expenses surface as their own Wants line so
- *  Savings = Income − Expenses stays honest even before categorization. */
-export function cashflowFromTransactions(month: string, d: Database.Database = db()): DerivedCashflow {
-  // income, grouped by payer
-  const incomeRows = d.prepare(
-    `SELECT COALESCE(NULLIF(TRIM(merchant), ''), name, 'Income') who,
-            ROUND(SUM(-amount), 2) total, COUNT(*) n
-     FROM transactions
-     WHERE txn_class = 'income' AND pending = 0 AND date LIKE ?
-     GROUP BY who ORDER BY total DESC`,
-  ).all(`${month}%`) as { who: string; total: number; n: number }[];
-  const income = incomeRows.map((r) => ({ label: r.who, value: r.total }));
-  const totalIncome = round2(income.reduce((s, i) => s + i.value, 0));
-
-  // needs: expenses in need-group categories, itemized per merchant
-  const needRows = d.prepare(
-    `SELECT COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, c.name) who,
-            ROUND(SUM(t.amount), 2) total, COUNT(*) n
-     FROM transactions t JOIN categories c ON c.id = t.category_id
-     WHERE t.txn_class = 'expense' AND t.pending = 0 AND t.date LIKE ? AND c.grp = 'need'
-     GROUP BY who ORDER BY total DESC`,
-  ).all(`${month}%`) as { who: string; total: number; n: number }[];
-  const needs = needRows.map((r) => ({ label: r.who, value: r.total }));
-  const totalNeeds = round2(needs.reduce((s, i) => s + i.value, 0));
-
-  // wants: per want-category sums, every category shown even at zero
-  const wantCats = d.prepare(
-    `SELECT id, name FROM categories WHERE grp = 'want' OR grp IS NULL ORDER BY sort ASC`,
-  ).all() as { id: number; name: string }[];
-  const wantSums = d.prepare(
-    `SELECT t.category_id, ROUND(SUM(t.amount), 2) total, COUNT(*) n
-     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.txn_class = 'expense' AND t.pending = 0 AND t.date LIKE ?
-       AND (t.category_id IS NULL OR c.grp != 'need')
-     GROUP BY t.category_id`,
-  ).all(`${month}%`) as { category_id: number | null; total: number; n: number }[];
-  const byId = new Map(wantSums.filter((s) => s.category_id !== null).map((s) => [s.category_id, s]));
-  const uncatRow = wantSums.find((s) => s.category_id === null);
-
-  const wants = wantCats.map((c) => ({ label: c.name, value: byId.get(c.id)?.total ?? 0 }));
-  if (uncatRow && uncatRow.total !== 0) wants.push({ label: "Uncategorized", value: uncatRow.total });
-  const totalWants = round2(wants.reduce((s, v) => s + v.value, 0));
-
-  const txnCount =
-    incomeRows.reduce((s, r) => s + r.n, 0) +
-    needRows.reduce((s, r) => s + r.n, 0) +
-    wantSums.reduce((s, r) => s + r.n, 0);
-
-  return {
-    income, totalIncome, needs, totalNeeds, wants, totalWants,
-    savings: round2(totalIncome - totalNeeds - totalWants),
-    txnCount,
-    uncategorized: uncatRow?.n ?? 0,
-  };
-}
-
 /** Months materialize from transaction dates (plan T4.4): any settled month
  *  seen in the ledger gets a budget_months row so the view can render it —
  *  no month-new ritual. Existing rows untouched. */
@@ -341,7 +270,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       incomeBy.set(r.label, row);
     } else {
       const key = r.cat ?? "Uncategorized";
-      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [] };
+      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp: r.grp === "need" ? "need" : "want" };
       row.value = round2(row.value + r.amount);
       row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount) });
       expenseBy.set(key, row);
