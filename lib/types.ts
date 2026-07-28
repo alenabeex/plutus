@@ -60,3 +60,30 @@ export interface ConnectionsData {
   security: string[];
   plaidConfigured: boolean; // keys present in Keychain?
 }
+
+export interface CashflowTxn {
+  id: number;
+  date: string;   // '2026-07-21'
+  label: string;  // merchant if set, else name
+  value: number;  // display sign: positive dollars for both income and expenses
+}
+
+export interface CashflowRow {
+  label: string;          // category (expenses) or payer (income)
+  value: number;
+  txns: CashflowTxn[];    // empty for stored/sheet months → no drill-down
+}
+
+export interface CashflowData {
+  month: string;          // '2026-07'
+  monthLabel: string;     // 'JUL 2026'
+  months: string[];       // all months for the ‹ › nav
+  source: "derived" | "stored";
+  income: CashflowRow[];
+  totalIncome: number;
+  expenses: CashflowRow[]; // flat, ranked by value desc
+  totalExpenses: number;
+  totalNeeds: number;      // for the allocation bar
+  totalWants: number;
+  saved: number;           // totalIncome − totalExpenses
+}

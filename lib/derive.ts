@@ -1,11 +1,82 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { db } from "./db";
+import type { CashflowRow } from "./types";
 
 // Derivation layer: linked-connection data → the three views.
 // - Net worth: already derived (accounts+balances → latestBalances).
-// - Cash Flow variable spending: transactions → category sums (this file).
+// - Cash Flow (plan §Phase 4, derivation contract 2026-07-25):
+//     classify every transaction income/expense/transfer by account role,
+//     then Income = income txns, Needs = need-category expenses itemized by
+//     merchant, Wants = want-category sums (+ Uncategorized so Savings math
+//     never overstates), Savings = Income − Needs − Wants.
 // - Subscriptions: recurring-charge detection over transactions (this file).
-// Runs at the end of every Plaid sync; everything is idempotent.
+// Runs at the end of every Plaid sync AND lazily from the budget route
+// (demo/no-sync installs); everything is idempotent.
+
+/* ── transaction classification (income / expense / transfer) ───────────── */
+
+// Transfer fingerprints: credit-card payments and own-account moves. These
+// must vanish from BOTH sides of Cash Flow or income and expenses double.
+const TRANSFER_PATTERNS = [
+  "payment thank you", "autopay", "auto pay", "automatic payment",
+  "credit crd", "crd epay", "card payment", "e-payment", "epay",
+  "online transfer", "transfer to", "transfer from", "internal transfer",
+  "ach transfer", "cashout", "cash out",
+];
+
+const isTransferText = (hay: string) => TRANSFER_PATTERNS.some((p) => hay.includes(p));
+const isTransferPfc = (pfc: string | null) =>
+  !!pfc && (pfc.startsWith("TRANSFER_") || pfc.includes("CREDIT_CARD_PAYMENT"));
+
+/** Account's role in cash flow. Explicit accounts.cashflow_role wins; else:
+ *  P2P wallets (Venmo/Cash App/PayPal) spend but never earn — their inflows
+ *  are reimbursements; cash accounts do both (income in, spending out);
+ *  credit cards spend; investment/manual sit outside cash flow. */
+function roleFor(a: { kind: string; institution: string | null; name: string; cashflow_role: string | null }): string {
+  if (a.cashflow_role) return a.cashflow_role;
+  const label = `${a.institution ?? ""} ${a.name}`.toLowerCase();
+  if (/venmo|cash app|paypal/.test(label)) return "spending";
+  if (a.kind === "cash") return "both";
+  if (a.kind === "credit") return "spending";
+  return "exclude";
+}
+
+/** Fill txn_class for every unclassified, settled transaction. Idempotent —
+ *  only NULL rows are touched, so a manual correction is never clobbered. */
+export function classifyTransactions(d: Database.Database = db()): number {
+  const rows = d.prepare(
+    `SELECT t.id, t.name, t.merchant, t.amount, t.pfc,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class IS NULL AND t.pending = 0`,
+  ).all() as {
+    id: number; name: string | null; merchant: string | null; amount: number;
+    pfc: string | null; kind: string; institution: string | null;
+    acct_name: string; cashflow_role: string | null;
+  }[];
+
+  const upd = d.prepare(`UPDATE transactions SET txn_class = ? WHERE id = ?`);
+  let n = 0;
+  for (const t of rows) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    const transferish = isTransferPfc(t.pfc) || isTransferText(hay);
+
+    let klass: string;
+    if (role === "exclude") klass = "transfer";
+    else if (transferish) klass = "transfer";
+    else if (t.amount > 0) klass = "expense"; // money out
+    else if (role === "both" || role === "income") klass = "income"; // money into a cash account
+    else klass = "transfer"; // inflow to a card/P2P wallet: refund-adjacent, not income
+    // refund exception: money back onto a credit card offsets spending
+    if (klass === "transfer" && role === "spending" && t.kind === "credit" && t.amount < 0 && !transferish) {
+      klass = "expense";
+    }
+    upd.run(klass, t.id);
+    n++;
+  }
+  return n;
+}
 
 /* ── categorization (plan T4.2) ─────────────────────────────────────────── */
 
@@ -30,15 +101,35 @@ const DEFAULT_RULES: [pattern: string, category: string][] = [
   ["apple.com", "Apps / Subs"], ["google", "Apps / Subs"], ["openai", "Apps / Subs"],
   ["interest", "Interest Fees / Violations"], ["late fee", "Interest Fees / Violations"],
   ["overdraft", "Interest Fees / Violations"], ["citation", "Interest Fees / Violations"],
+  // needs (grp='need' categories — bills and subscriptions)
+  // bare "rent" would hit "car rental"; anchor to the payment forms instead
+  ["rent ach", "Rent / Housing"], ["rent payment", "Rent / Housing"],
+  ["propert", "Rent / Housing"], ["apartment", "Rent / Housing"], ["mortgage", "Rent / Housing"],
+  ["pg&e", "Utilities"], ["pgande", "Utilities"], ["edison", "Utilities"],
+  ["utility", "Utilities"], ["utilities", "Utilities"], ["electric co", "Utilities"],
+  ["water dept", "Utilities"], ["waste management", "Utilities"],
+  ["comcast", "Phone / Internet"], ["xfinity", "Phone / Internet"], ["verizon", "Phone / Internet"],
+  ["t-mobile", "Phone / Internet"], ["tmobile", "Phone / Internet"], ["at&t", "Phone / Internet"],
+  ["spectrum", "Phone / Internet"], ["internet", "Phone / Internet"], ["wireless", "Phone / Internet"],
+  ["insurance", "Insurance"], ["geico", "Insurance"], ["state farm", "Insurance"],
+  ["progressive", "Insurance"], ["allstate", "Insurance"],
+  ["pharmacy", "Medical / Health"], ["cvs", "Medical / Health"], ["walgreens", "Medical / Health"],
+  ["clinic", "Medical / Health"], ["dental", "Medical / Health"], ["kaiser", "Medical / Health"],
+  ["streamflix", "Apps / Subs"], ["gym", "Apps / Subs"],
 ];
 
-/** Ensure starter rules exist (idempotent — skips if any rules present). */
+/** Ensure starter rules exist. Pattern-level idempotent: each missing
+ *  pattern is added, so new defaults reach databases that seeded earlier
+ *  rule sets. User corrections (their own rows) are never touched. */
 function seedDefaultRules(d: Database.Database = db()): void {
-  const count = (d.prepare(`SELECT COUNT(*) c FROM category_rules`).get() as { c: number }).c;
-  if (count > 0) return;
+  const have = new Set(
+    (d.prepare(`SELECT pattern FROM category_rules`).all() as { pattern: string }[])
+      .map((r) => r.pattern.toLowerCase()),
+  );
   const cat = d.prepare(`SELECT id FROM categories WHERE name = ?`);
   const ins = d.prepare(`INSERT INTO category_rules (pattern, field, category_id) VALUES (?, 'merchant', ?)`);
   for (const [pattern, name] of DEFAULT_RULES) {
+    if (have.has(pattern)) continue;
     const row = cat.get(name) as { id: number } | undefined;
     if (row) ins.run(pattern, row.id);
   }
@@ -66,41 +157,90 @@ export function categorizeTransactions(d: Database.Database = db()): number {
   return hits;
 }
 
-/* ── budget derivation (plan T4.3) ──────────────────────────────────────── */
+/* ── cash-flow derivation (plan T4.2/T4.3) ──────────────────────────────── */
 
-export interface DerivedVariable {
-  variable: { label: string; value: number }[];
-  totalVariable: number;
-  txnCount: number;
-  uncategorized: number;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export interface DerivedCashflow {
+  income: { label: string; value: number }[];
+  totalIncome: number;
+  needs: { label: string; value: number }[];   // itemized per merchant (bills read as bills)
+  totalNeeds: number;
+  wants: { label: string; value: number }[];   // per want-category (+ Uncategorized line)
+  totalWants: number;
+  savings: number;                              // income − needs − wants
+  txnCount: number;                             // classified income+expense txns this month
+  uncategorized: number;                        // expense txns with no category yet
 }
 
-/** Per-category spending sums from transactions for a month ('2026-07').
- *  Plaid convention: positive amount = money out. Credit-card payments and
- *  transfers aren't spending — rules never map them, so they stay
- *  uncategorized and OUT of the category sums (visible via `uncategorized`). */
-export function variableFromTransactions(month: string, d: Database.Database = db()): DerivedVariable {
-  const cats = d.prepare(`SELECT id, name FROM categories ORDER BY sort ASC`).all() as
-    { id: number; name: string }[];
-
-  const sums = d.prepare(
-    `SELECT category_id, ROUND(SUM(amount), 2) total, COUNT(*) n
+/** Everything Cash Flow needs for one month ('2026-07'), straight from
+ *  classified transactions. Plaid convention: positive = money out.
+ *  Transfers (CC payments, own-account moves) are already excluded by
+ *  txn_class. Uncategorized expenses surface as their own Wants line so
+ *  Savings = Income − Expenses stays honest even before categorization. */
+export function cashflowFromTransactions(month: string, d: Database.Database = db()): DerivedCashflow {
+  // income, grouped by payer
+  const incomeRows = d.prepare(
+    `SELECT COALESCE(NULLIF(TRIM(merchant), ''), name, 'Income') who,
+            ROUND(SUM(-amount), 2) total, COUNT(*) n
      FROM transactions
-     WHERE date LIKE ? AND pending = 0 AND amount > 0
-     GROUP BY category_id`,
+     WHERE txn_class = 'income' AND pending = 0 AND date LIKE ?
+     GROUP BY who ORDER BY total DESC`,
+  ).all(`${month}%`) as { who: string; total: number; n: number }[];
+  const income = incomeRows.map((r) => ({ label: r.who, value: r.total }));
+  const totalIncome = round2(income.reduce((s, i) => s + i.value, 0));
+
+  // needs: expenses in need-group categories, itemized per merchant
+  const needRows = d.prepare(
+    `SELECT COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, c.name) who,
+            ROUND(SUM(t.amount), 2) total, COUNT(*) n
+     FROM transactions t JOIN categories c ON c.id = t.category_id
+     WHERE t.txn_class = 'expense' AND t.pending = 0 AND t.date LIKE ? AND c.grp = 'need'
+     GROUP BY who ORDER BY total DESC`,
+  ).all(`${month}%`) as { who: string; total: number; n: number }[];
+  const needs = needRows.map((r) => ({ label: r.who, value: r.total }));
+  const totalNeeds = round2(needs.reduce((s, i) => s + i.value, 0));
+
+  // wants: per want-category sums, every category shown even at zero
+  const wantCats = d.prepare(
+    `SELECT id, name FROM categories WHERE grp = 'want' OR grp IS NULL ORDER BY sort ASC`,
+  ).all() as { id: number; name: string }[];
+  const wantSums = d.prepare(
+    `SELECT t.category_id, ROUND(SUM(t.amount), 2) total, COUNT(*) n
+     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+     WHERE t.txn_class = 'expense' AND t.pending = 0 AND t.date LIKE ?
+       AND (t.category_id IS NULL OR c.grp != 'need')
+     GROUP BY t.category_id`,
   ).all(`${month}%`) as { category_id: number | null; total: number; n: number }[];
+  const byId = new Map(wantSums.filter((s) => s.category_id !== null).map((s) => [s.category_id, s]));
+  const uncatRow = wantSums.find((s) => s.category_id === null);
 
-  const byId = new Map(sums.filter((s) => s.category_id !== null).map((s) => [s.category_id, s]));
-  const uncatRow = sums.find((s) => s.category_id === null);
+  const wants = wantCats.map((c) => ({ label: c.name, value: byId.get(c.id)?.total ?? 0 }));
+  if (uncatRow && uncatRow.total !== 0) wants.push({ label: "Uncategorized", value: uncatRow.total });
+  const totalWants = round2(wants.reduce((s, v) => s + v.value, 0));
 
-  const variable = cats.map((c) => ({
-    label: c.name,
-    value: byId.get(c.id)?.total ?? 0,
-  }));
-  const totalVariable = Math.round(variable.reduce((s, v) => s + v.value, 0) * 100) / 100;
-  const txnCount = sums.reduce((s, r) => s + r.n, 0);
+  const txnCount =
+    incomeRows.reduce((s, r) => s + r.n, 0) +
+    needRows.reduce((s, r) => s + r.n, 0) +
+    wantSums.reduce((s, r) => s + r.n, 0);
 
-  return { variable, totalVariable, txnCount, uncategorized: uncatRow?.n ?? 0 };
+  return {
+    income, totalIncome, needs, totalNeeds, wants, totalWants,
+    savings: round2(totalIncome - totalNeeds - totalWants),
+    txnCount,
+    uncategorized: uncatRow?.n ?? 0,
+  };
+}
+
+/** Months materialize from transaction dates (plan T4.4): any settled month
+ *  seen in the ledger gets a budget_months row so the view can render it —
+ *  no month-new ritual. Existing rows untouched. */
+export function ensureMonthsFromTransactions(d: Database.Database = db()): void {
+  const months = d.prepare(
+    `SELECT DISTINCT substr(date, 1, 7) m FROM transactions WHERE pending = 0 AND date IS NOT NULL`,
+  ).all() as { m: string }[];
+  const ins = d.prepare(`INSERT OR IGNORE INTO budget_months (month) VALUES (?)`);
+  for (const { m } of months) if (/^\d{4}-\d{2}$/.test(m)) ins.run(m);
 }
 
 /* ── recurring detection (plan T5.1) ────────────────────────────────────── */
@@ -162,9 +302,70 @@ export function detectRecurring(d: Database.Database = db()): number {
   return found;
 }
 
+export interface DerivedCashflowView {
+  income: CashflowRow[];
+  totalIncome: number;
+  expenses: CashflowRow[];   // flat, ranked by value desc; 'Uncategorized' bucket included
+  totalExpenses: number;
+  totalNeeds: number;
+  totalWants: number;
+  txnCount: number;
+}
+
+/** The read-only Cash Flow page's data (spec 2026-07-27): expenses grouped by
+ *  CATEGORY (merchants live inside each row's txns), income grouped by payer,
+ *  needs/wants totals split by categories.grp for the allocation bar.
+ *  Plaid sign convention: positive = money out; display values are positive
+ *  on both sides. Transfers/pending are excluded via txn_class/pending. */
+export function cashflowView(month: string, d: Database.Database = db()): DerivedCashflowView {
+  const rows = d.prepare(
+    `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
+            t.amount, t.txn_class, c.name cat, c.grp
+     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+     WHERE t.pending = 0 AND t.date LIKE ? AND t.txn_class IN ('income', 'expense')
+     ORDER BY t.date DESC, t.id DESC`,
+  ).all(`${month}%`) as {
+    id: number; date: string; label: string; amount: number;
+    txn_class: "income" | "expense"; cat: string | null; grp: string | null;
+  }[];
+
+  const incomeBy = new Map<string, CashflowRow>();
+  const expenseBy = new Map<string, CashflowRow>();
+  let totalNeeds = 0;
+
+  for (const r of rows) {
+    if (r.txn_class === "income") {
+      const row = incomeBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
+      row.value = round2(row.value + -r.amount);
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(-r.amount) });
+      incomeBy.set(r.label, row);
+    } else {
+      const key = r.cat ?? "Uncategorized";
+      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [] };
+      row.value = round2(row.value + r.amount);
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount) });
+      expenseBy.set(key, row);
+      if (r.grp === "need") totalNeeds = round2(totalNeeds + r.amount);
+    }
+  }
+
+  const income = [...incomeBy.values()].sort((a, b) => b.value - a.value);
+  const expenses = [...expenseBy.values()].sort((a, b) => b.value - a.value);
+  const totalIncome = round2(income.reduce((s, r) => s + r.value, 0));
+  const totalExpenses = round2(expenses.reduce((s, r) => s + r.value, 0));
+
+  return {
+    income, totalIncome, expenses, totalExpenses,
+    totalNeeds, totalWants: round2(totalExpenses - totalNeeds),
+    txnCount: rows.length,
+  };
+}
+
 /** Full post-sync derivation pass. */
-export function deriveAll(d: Database.Database = db()): { categorized: number; detected: number } {
+export function deriveAll(d: Database.Database = db()): { classified: number; categorized: number; detected: number } {
+  const classified = classifyTransactions(d);
   const categorized = categorizeTransactions(d);
+  ensureMonthsFromTransactions(d);
   const detected = detectRecurring(d);
-  return { categorized, detected };
+  return { classified, categorized, detected };
 }
