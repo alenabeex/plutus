@@ -21,26 +21,6 @@ export interface NetworthData {
   }[];
 }
 
-export interface BudgetData {
-  month: string;           // '2026-01'
-  monthLabel: string;      // 'JAN 2026'
-  months: string[];        // all available months for the ‹ › nav
-  income: { label: string; value: number }[];
-  taxSetAside: number;
-  totalIncome: number;
-  totalLeftAfterFixed: number;
-  fixed: { label: string; value: number }[];
-  totalFixed: number;
-  variable: { label: string; value: number }[];
-  totalVariable: number;
-  savings: {
-    amount: number;
-    cashPct: number; cashAmt: number;
-    investedPct: number; investedAmt: number;
-    grade: string; gradeColor: string;
-  };
-}
-
 export interface SubscriptionsData {
   month: string;
   monthLabel: string;
