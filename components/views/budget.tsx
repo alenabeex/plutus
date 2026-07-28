@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { usd, gradeFor } from "@/lib/format";
-import type { CashflowData, CashflowRow } from "@/lib/types";
+import type { CashflowData, CashflowRow, CashflowTxn } from "@/lib/types";
 
 interface BudgetViewProps {
   month: string;
@@ -40,21 +40,133 @@ function Tile({ label, value, bg, color, sub, subColor }: {
   );
 }
 
-function Row({ row, total, open, onToggle, valueColor, categories, openTxnMenu, onToggleTxnMenu, onTxnAction }: {
+// Actions popover for one transaction — anchored to its own ⋯ button so
+// each txn row owns its outside-click-close listener independently (same
+// idiom as the header's Export popover / plusRef, just one instance per
+// row instead of one for the whole view). Two sections: "Move to a
+// different category" (expense rows only — a pill showing the txn's
+// current category expands the pick list inline) and "Dispute charge"
+// (always present).
+function TxnRow({
+  t, rowLabel, categories, isOpen, categoryPickerOpen,
+  onToggle, onClose, onToggleCategoryPicker, onTxnAction,
+}: {
+  t: CashflowTxn;
+  rowLabel: string;
+  categories: { id: number; name: string; grp: "need" | "want" }[];
+  isOpen: boolean;
+  categoryPickerOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onToggleCategoryPicker: () => void;
+  onTxnAction: (id: number, action: "category" | "dispute", categoryId?: number) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [isOpen, onClose]);
+
+  // categories=[] for income-side rows (categories are an expense concept)
+  // — same signal the view already uses elsewhere to keep income/expense
+  // rows apart.
+  const isExpense = categories.length > 0;
+  const chipCats = categories.filter((c) => c.name !== rowLabel);
+
+  return (
+    <div className="flex items-center gap-3 px-1 py-1 text-xs2" style={{ color: MUTED }}>
+      <div className="flex min-w-0 flex-1 justify-between">
+        <span className="truncate">{t.date.slice(5)} · {t.label}</span>
+        <span className="num">{usd(t.value)}</span>
+      </div>
+      <div ref={menuRef} className="relative w-9 text-right">
+        <button
+          type="button"
+          aria-label="Actions for this transaction"
+          style={{ color: MUTED, cursor: "pointer" }}
+          onClick={onToggle}
+        >⋯</button>
+        {isOpen && (
+          <div
+            className="absolute right-0 z-20 p-2"
+            style={{
+              top: "100%", marginTop: 4, background: CARD, border: `1px solid ${LINE}`,
+              borderRadius: 14, boxShadow: "0 8px 30px rgba(16,17,20,.12)", width: 240,
+            }}
+          >
+            {isExpense && (
+              <div className="mb-1.5">
+                <div className="mb-1.5 text-sm2" style={{ color: INK }}>Move to a different category</div>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs2"
+                  style={{ border: `1px solid ${LINE}`, color: MUTED, cursor: "pointer" }}
+                  onClick={onToggleCategoryPicker}
+                >
+                  {rowLabel}
+                  <ChevronDown size={12} aria-hidden />
+                </button>
+                {categoryPickerOpen && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {chipCats.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="rounded-full px-2.5 py-1 text-xs2"
+                        style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+                        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                        onClick={() => onTxnAction(t.id, "category", c.id)}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              className="text-sm2"
+              style={{
+                all: "unset" as unknown as undefined,
+                display: "block", width: "100%", boxSizing: "border-box",
+                padding: "9px 12px", borderRadius: 10, cursor: "pointer", color: BAD,
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+              onClick={() => onTxnAction(t.id, "dispute")}
+            >
+              Dispute charge
+            </button>
+          </div>
+        )}
+      </div>
+      <span className="w-[15px]" aria-hidden />
+    </div>
+  );
+}
+
+function Row({
+  row, total, open, onToggle, valueColor, categories,
+  openTxnMenu, categoryPickerOpen, onToggleTxnMenu, onCloseTxnMenu, onToggleCategoryPicker, onTxnAction,
+}: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
   categories: { id: number; name: string; grp: "need" | "want" }[];
   openTxnMenu: number | null;
+  categoryPickerOpen: boolean;
   onToggleTxnMenu: (id: number) => void;
+  onCloseTxnMenu: () => void;
+  onToggleCategoryPicker: () => void;
   onTxnAction: (id: number, action: "category" | "dispute", categoryId?: number) => void;
 }) {
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
-  // Category chips exclude the category this row already belongs to. Empty
-  // for income rows (categories prop passed as [] there) and for the
-  // "Uncategorized" bucket (no real category shares that name, so nothing
-  // is excluded and every category is offered).
-  const chipCats = categories.filter((c) => c.name !== row.label);
-  const chipStyle: React.CSSProperties = { border: `1px solid ${LINE}`, color: MUTED };
   return (
     <div>
       <button
@@ -87,51 +199,18 @@ function Row({ row, total, open, onToggle, valueColor, categories, openTxnMenu, 
       {drillable && open && (
         <div className="mb-2 ml-3 border-l-2 pl-3" style={{ borderColor: LINE }}>
           {row.txns.map((t) => (
-            <div key={t.id}>
-              {/* px-1 mirrors the parent row button's padding so amounts flush-align */}
-              <div className="flex items-center gap-3 px-1 py-1 text-xs2" style={{ color: MUTED }}>
-                <div className="flex min-w-0 flex-1 justify-between">
-                  <span className="truncate">{t.date.slice(5)} · {t.label}</span>
-                  <span className="num">{usd(t.value)}</span>
-                </div>
-                <div className="w-9 text-right">
-                  <button
-                    type="button"
-                    aria-label="Actions for this transaction"
-                    style={{ color: MUTED, cursor: "pointer" }}
-                    onClick={() => onToggleTxnMenu(t.id)}
-                  >⋯</button>
-                </div>
-                <span className="w-[15px]" aria-hidden />
-              </div>
-              {openTxnMenu === t.id && (
-                <div className="flex flex-wrap gap-1.5 py-1">
-                  {chipCats.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className="rounded-full px-2.5 py-1 text-xs2"
-                      style={chipStyle}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-                      onClick={() => onTxnAction(t.id, "category", c.id)}
-                    >
-                      {c.name}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className="rounded-full px-2.5 py-1 text-xs2"
-                    style={{ ...chipStyle, borderColor: `${BAD}66`, color: BAD }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                    onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-                    onClick={() => onTxnAction(t.id, "dispute")}
-                  >
-                    Disputed charge
-                  </button>
-                </div>
-              )}
-            </div>
+            <TxnRow
+              key={t.id}
+              t={t}
+              rowLabel={row.label}
+              categories={categories}
+              isOpen={openTxnMenu === t.id}
+              categoryPickerOpen={categoryPickerOpen}
+              onToggle={() => onToggleTxnMenu(t.id)}
+              onClose={onCloseTxnMenu}
+              onToggleCategoryPicker={onToggleCategoryPicker}
+              onTxnAction={onTxnAction}
+            />
           ))}
           <div className="py-1 text-xs2" style={{ color: MUTED }}>
             Wrong category? Fix it on the transaction.
@@ -150,6 +229,9 @@ export default function BudgetView({
   const [loading, setLoading] = useState(true);
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [openTxnMenu, setOpenTxnMenu] = useState<number | null>(null);
+  // Whether the currently-open txn popover has its category pick-list
+  // expanded — one popover open at a time, so one boolean is enough.
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   // >0 when the requested month has real settled transactions but isn't
   // synced yet (spec 2026-07-28's backfill gate) — the notFound render forks
   // on this to offer "Sync Month" instead of the generic empty state.
@@ -168,6 +250,7 @@ export default function BudgetView({
     setLoading(true);
     setOpenRow(null);
     setOpenTxnMenu(null);
+    setCategoryPickerOpen(false);
     setGatedTxnCount(0);
     setSyncError(null);
   }
@@ -225,12 +308,13 @@ export default function BudgetView({
     return () => { stale = true; };
   }, [loadMonth]);
 
-  // Transaction actions from the drill-down ⋯ menu (spec 2026-07-28): this is
-  // the read-only page's one write path — edit the transaction, never the
-  // sheet. Close the menu, call the API, re-fetch so everything recomputes.
+  // Transaction actions from the drill-down ⋯ popover (spec 2026-07-28): this
+  // is the read-only page's one write path — edit the transaction, never the
+  // sheet. Close the popover, call the API, re-fetch so everything recomputes.
   const onTxnAction = useCallback(
     async (id: number, action: "category" | "dispute", categoryId?: number) => {
       setOpenTxnMenu(null);
+      setCategoryPickerOpen(false);
       const body = action === "category" ? { id, action, categoryId } : { id, action };
       const res = await fetch("/api/transactions", {
         method: "PUT",
@@ -243,6 +327,20 @@ export default function BudgetView({
     },
     [onLocked, loadMonth],
   );
+
+  // One popover open at a time: toggling a different txn's ⋯ button (or
+  // closing the current one) always collapses any expanded category list.
+  const onToggleTxnMenu = useCallback((id: number) => {
+    setOpenTxnMenu((cur) => (cur === id ? null : id));
+    setCategoryPickerOpen(false);
+  }, []);
+  const onCloseTxnMenu = useCallback(() => {
+    setOpenTxnMenu(null);
+    setCategoryPickerOpen(false);
+  }, []);
+  const onToggleCategoryPicker = useCallback(() => {
+    setCategoryPickerOpen((v) => !v);
+  }, []);
 
   useEffect(() => {
     if (!plusOpen) return;
@@ -364,7 +462,8 @@ export default function BudgetView({
           <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD}
                open={openRow === `i:${row.label}`}
                onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)}
-               categories={[]} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+               categories={[]} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
+               onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
                onTxnAction={onTxnAction} />
         ))}
       </div>
@@ -381,7 +480,8 @@ export default function BudgetView({
               <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
                    open={openRow === `e:${row.label}`}
                    onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                   categories={data.categories} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+                   categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
+                   onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
                    onTxnAction={onTxnAction} />
             ))}
           </>
@@ -393,7 +493,8 @@ export default function BudgetView({
               <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD}
                    open={openRow === `e:${row.label}`}
                    onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                   categories={data.categories} openTxnMenu={openTxnMenu} onToggleTxnMenu={(id) => setOpenTxnMenu(openTxnMenu === id ? null : id)}
+                   categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
+                   onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
                    onTxnAction={onTxnAction} />
             ))}
           </>
