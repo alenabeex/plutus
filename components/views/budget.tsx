@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
-import { CARD, LINE, SOFT, MUTED, INK, GOOD } from "@/lib/colors";
+import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { usd } from "@/lib/format";
 import type { CashflowData, CashflowRow } from "@/lib/types";
 
@@ -25,14 +25,14 @@ interface BudgetViewProps {
 const pct = (part: number, total: number) =>
   total > 0 ? Math.round((part / total) * 100) : 0;
 
-function Tile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Tile({ label, value, bg, color }: { label: string; value: string; bg?: string; color?: string }) {
   return (
     <div
       className="flex-1 rounded-2xl p-4"
-      style={{ background: accent ? SOFT : CARD, border: `1px solid ${LINE}` }}
+      style={{ background: bg ?? CARD, border: `1px solid ${LINE}` }}
     >
       <div className="text-xs2 mb-1" style={{ color: MUTED }}>{label}</div>
-      <div className="num text-num-lg font-extrabold" style={{ color: accent ? GOOD : INK }}>{value}</div>
+      <div className="num text-num-lg font-extrabold" style={{ color: color ?? INK }}>{value}</div>
     </div>
   );
 }
@@ -237,10 +237,10 @@ export default function BudgetView({
       {header}
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-        <Tile label="Income" value={usd(data.totalIncome)} />
-        <Tile label="Expenses" value={usd(data.totalExpenses)} />
+        <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
+        <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
         <Tile label="Saved" value={usd(data.saved)} />
-        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} accent />
+        <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={SOFT} color={GOOD} />
       </div>
 
       <AllocationBar needs={data.totalNeeds} wants={data.totalWants} income={data.totalIncome} />
