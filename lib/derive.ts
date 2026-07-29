@@ -28,6 +28,20 @@ const isTransferText = (hay: string) => TRANSFER_PATTERNS.some((p) => hay.includ
 const isTransferPfc = (pfc: string | null) =>
   !!pfc && (pfc.startsWith("TRANSFER_") || pfc.includes("CREDIT_CARD_PAYMENT"));
 
+// Saved fingerprints: money leaving a cash account FOR an investment or
+// savings destination. These are income that became investments — they get
+// their own 'saved' class (and Cash Flow section) instead of vanishing as
+// generic transfers. Only the cash-account side matches; the investment
+// account's own mirror row keeps role "exclude" → transfer, so nothing
+// double-counts.
+const SAVED_PATTERNS = [
+  "robinhood", "vanguard", "fidelity", "schwab", "wealthfront", "betterment",
+  "acorns", "coinbase", "etrade", "e*trade", "webull", "sofi invest",
+  "brokerage", "401k", "401(k)", "roth ira", "ira contribution",
+  "hysa", "high yield sav", "to savings", "savings transfer",
+];
+const isSavedText = (hay: string) => SAVED_PATTERNS.some((p) => hay.includes(p));
+
 /** Account's role in cash flow. Explicit accounts.cashflow_role wins; else:
  *  P2P wallets (Venmo/Cash App/PayPal) spend but never earn — their inflows
  *  are reimbursements; cash accounts do both (income in, spending out);
@@ -62,8 +76,14 @@ export function classifyTransactions(d: Database.Database = db()): number {
     const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
     const transferish = isTransferPfc(t.pfc) || isTransferText(hay);
 
+    const savedish = isSavedText(hay);
+
     let klass: string;
     if (role === "exclude") klass = "transfer";
+    // saved wins over the generic transfer fingerprints: "transfer to
+    // vanguard" is savings, not noise — but only for money leaving a cash
+    // account. Card payments/P2P stay transfers.
+    else if (savedish && (role === "both" || role === "income") && t.amount > 0) klass = "saved";
     else if (transferish) klass = "transfer";
     else if (t.amount > 0) klass = "expense"; // money out
     else if (role === "both" || role === "income") klass = "income"; // money into a cash account
@@ -73,6 +93,29 @@ export function classifyTransactions(d: Database.Database = db()): number {
       klass = "expense";
     }
     upd.run(klass, t.id);
+    n++;
+  }
+
+  // One-time upgrade for rows classed before 'saved' existed: machine-made
+  // 'transfer' rows that match the saved fingerprints become 'saved'. Safe
+  // because manual moves write income/saved/expense — never 'transfer' — so
+  // this can only ever touch auto-classified rows. Idempotent: after the
+  // flip, the row no longer matches txn_class='transfer'.
+  const legacy = d.prepare(
+    `SELECT t.id, t.name, t.merchant, t.amount,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount > 0`,
+  ).all() as {
+    id: number; name: string | null; merchant: string | null; amount: number;
+    kind: string; institution: string | null; acct_name: string; cashflow_role: string | null;
+  }[];
+  for (const t of legacy) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "both" && role !== "income") continue;
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    if (!isSavedText(hay)) continue;
+    upd.run("saved", t.id);
     n++;
   }
   return n;
@@ -245,6 +288,9 @@ export interface DerivedCashflowView {
   totalExpenses: number;
   totalNeeds: number;
   totalWants: number;
+  savedRows: CashflowRow[];  // txn_class='saved' — income that became investments
+  totalSaved: number;
+  disputed: CashflowRow | null; // txn_class='excluded', one folder — visible, never counted
   txnCount: number;
 }
 
@@ -258,23 +304,42 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
     `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
             t.amount, t.txn_class, c.name cat, c.grp
      FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.pending = 0 AND t.date LIKE ? AND t.txn_class IN ('income', 'expense')
+     WHERE t.pending = 0 AND t.date LIKE ? AND t.txn_class IN ('income', 'expense', 'saved', 'excluded')
      ORDER BY t.date DESC, t.id DESC`,
   ).all(`${month}%`) as {
     id: number; date: string; label: string; amount: number;
-    txn_class: "income" | "expense"; cat: string | null; grp: string | null;
+    txn_class: "income" | "expense" | "saved" | "excluded"; cat: string | null; grp: string | null;
   }[];
 
   const incomeBy = new Map<string, CashflowRow>();
   const expenseBy = new Map<string, CashflowRow>();
+  const savedBy = new Map<string, CashflowRow>();
+  // Disputed txns collect into ONE folder — visible at the bottom of
+  // Expenses so negated charges stay auditable, but never in any total.
+  const disputedTxns: CashflowRow["txns"] = [];
+  let disputedTotal = 0;
   let totalNeeds = 0;
 
   for (const r of rows) {
+    if (r.txn_class === "excluded") {
+      disputedTxns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount) });
+      disputedTotal = round2(disputedTotal + r.amount);
+      continue;
+    }
     if (r.txn_class === "income") {
       const row = incomeBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
       row.value = round2(row.value + -r.amount);
       row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(-r.amount) });
       incomeBy.set(r.label, row);
+    } else if (r.txn_class === "saved") {
+      // grouped by destination (merchant/name). Sign-agnostic on purpose:
+      // an outflow to Vanguard (+) and an income txn moved here (−) are both
+      // "money that became savings" — display both as positive dollars saved.
+      const v = round2(Math.abs(r.amount));
+      const row = savedBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
+      row.value = round2(row.value + v);
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: v });
+      savedBy.set(r.label, row);
     } else {
       const key = r.cat ?? "Uncategorized";
       const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp: r.grp === "need" ? "need" : "want" };
@@ -287,13 +352,21 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
 
   const income = [...incomeBy.values()].sort((a, b) => b.value - a.value);
   const expenses = [...expenseBy.values()].sort((a, b) => b.value - a.value);
+  const savedRows = [...savedBy.values()].sort((a, b) => b.value - a.value);
   const totalIncome = round2(income.reduce((s, r) => s + r.value, 0));
   const totalExpenses = round2(expenses.reduce((s, r) => s + r.value, 0));
+  const totalSaved = round2(savedRows.reduce((s, r) => s + r.value, 0));
 
   return {
     income, totalIncome, expenses, totalExpenses,
     totalNeeds, totalWants: round2(totalExpenses - totalNeeds),
-    txnCount: rows.length,
+    savedRows, totalSaved,
+    disputed: disputedTxns.length > 0
+      ? { label: "Disputed", value: disputedTotal, txns: disputedTxns }
+      : null,
+    // active classes only — disputed must not make an otherwise-empty month
+    // look like it has cash flow
+    txnCount: rows.length - disputedTxns.length,
   };
 }
 

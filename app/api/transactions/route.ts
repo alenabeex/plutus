@@ -12,9 +12,18 @@ export const runtime = "nodejs";
 //    transactions from that merchant categorize themselves on the next sync.
 //  - "dispute": mark a transaction excluded from Cash Flow entirely (wrong
 //    charge, refunded in cash, etc.) — no undo UI yet, see report.
+//  - "move": reclassify a transaction into a different Cash Flow area —
+//    income, saved (money that became investments), expense, or disputed
+//    (the visible folder at the bottom of Expenses; stored as
+//    txn_class='excluded', same value "dispute" always wrote, so old rows
+//    and new ones are one population). Moving to expense takes an optional
+//    categoryId so the txn lands in a real category instead of
+//    Uncategorized. classifyTransactions only fills NULL txn_class rows,
+//    so a manual move sticks across syncs.
 type Body =
   | { id: number; action: "category"; categoryId: number }
-  | { id: number; action: "dispute" };
+  | { id: number; action: "dispute" }
+  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed"; categoryId?: number };
 
 export const PUT = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
@@ -62,6 +71,34 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       }
     }
 
+    return withRefreshedSession(req, { ok: true });
+  }
+
+  if (body.action === "move") {
+    const to = (body as { to?: string }).to;
+    if (to !== "income" && to !== "saved" && to !== "expense" && to !== "disputed") {
+      return NextResponse.json({ ok: false, error: "bad destination" }, { status: 400 });
+    }
+    if (to === "disputed") {
+      // keep category_id — un-disputing back to expense restores it
+      d.prepare(`UPDATE transactions SET txn_class = 'excluded' WHERE id = ?`).run(body.id);
+    } else if (to === "expense") {
+      const categoryId = (body as { categoryId?: number }).categoryId;
+      if (typeof categoryId === "number") {
+        const category = d.prepare(`SELECT id FROM categories WHERE id = ?`).get(categoryId);
+        if (!category) {
+          return NextResponse.json({ ok: false, error: "category not found" }, { status: 400 });
+        }
+        d.prepare(`UPDATE transactions SET txn_class = 'expense', category_id = ? WHERE id = ?`)
+          .run(categoryId, body.id);
+      } else {
+        d.prepare(`UPDATE transactions SET txn_class = 'expense' WHERE id = ?`).run(body.id);
+      }
+    } else {
+      // income/saved don't use categories — clear any stale one
+      d.prepare(`UPDATE transactions SET txn_class = ?, category_id = NULL WHERE id = ?`)
+        .run(to, body.id);
+    }
     return withRefreshedSession(req, { ok: true });
   }
 

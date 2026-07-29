@@ -67,6 +67,9 @@ export interface CashflowData {
   totalNeeds: number;      // for the allocation bar
   totalWants: number;
   saved: number;           // totalIncome − totalExpenses
+  savedRows: CashflowRow[]; // txn_class='saved' — income that became investments
+  totalSaved: number;       // sum of savedRows (≠ `saved`, the leftover)
+  disputed: CashflowRow | null; // txn_class='excluded' — the Disputed folder at the bottom of Expenses
   categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
   txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }

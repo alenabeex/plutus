@@ -53,6 +53,8 @@ function buildCashflowData(month: string): CashflowData {
         expenses: v.expenses, totalExpenses: v.totalExpenses,
         totalNeeds: v.totalNeeds, totalWants: v.totalWants,
         saved: round2(v.totalIncome - v.totalExpenses),
+        savedRows: v.savedRows, totalSaved: v.totalSaved,
+        disputed: v.disputed,
       };
     }
   }
@@ -76,6 +78,8 @@ function buildCashflowData(month: string): CashflowData {
     expenses, totalExpenses,
     totalNeeds: row.total_fixed, totalWants: row.total_variable,
     saved: round2(row.total_income - totalExpenses),
+    // sheet months predate transaction data — nothing to itemize
+    savedRows: [], totalSaved: 0, disputed: null,
   };
 }
 
