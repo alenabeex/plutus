@@ -805,11 +805,12 @@ export default function BudgetView({
       <div className="mb-6 flex flex-col gap-3 sm:flex-row">
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
-        {/* Saved tile = the Savings section's total (spec Alena 2026-07-28):
-            money actively put away this month. Moving a txn between Savings
-            and Expenses shifts BOTH tiles by that amount on the same refetch
-            — recategorizing is visible at the top, in real time. */}
-        <Tile label="Saved" value={usd(data.totalSaved)} color={INK} />
+        {/* "Left over" = income − expenses (owner ruling 2026-07-28: the tile
+            row must reconcile — income − expenses = saved — so this can't
+            bind to the Savings card's total below). Renamed from "Saved" to
+            "Left over" since a "Savings" card on the same page showing a
+            different number made "Saved" read ambiguous. */}
+        <Tile label="Left over" value={usd(data.saved)} color={data.saved < 0 ? BAD : INK} />
         <Tile label="Savings rate" value={rate === null ? "—" : `${rate}%`} bg={gradeBg}
               color={gradeColor} sub={grade === "—" ? undefined : grade} subColor={gradeColor} />
       </div>
@@ -893,8 +894,9 @@ export default function BudgetView({
       </div>
 
       {/* Savings — income that became investments (txn_class='saved'). Not
-          the same number as the Saved tile: the tile is what's left over,
-          this is money actively moved into savings/investment destinations. */}
+          the same number as the "Left over" tile above: that tile is
+          income − expenses, this is money actively moved into savings/
+          investment destinations — a different, deliberate number. */}
       <div className="mt-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-num-md font-bold" style={{ color: INK }}>
