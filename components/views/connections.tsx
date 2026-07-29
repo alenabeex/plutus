@@ -394,6 +394,11 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
   // Institution row menu / delete confirm (keyed by institution name)
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Per-row Re-sync — keyed by institution name (the same key remove/revoke
+  // use, since a row carries no numeric item id to the client). Only one
+  // menu is open at a time, so only one row can be mid-sync at a time.
+  const [resyncing, setResyncing] = useState<string | null>(null);
+  const [resyncError, setResyncError] = useState<string | null>(null);
 
   const deleteInstitution = async (name: string) => {
     setConfirmDelete(null);
@@ -413,6 +418,37 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
       const err = (await res.json().catch(() => null)) as { error?: string } | null;
       window.alert(`Couldn't remove ${name}: ${err?.error ?? `HTTP ${res.status}`}`);
       load();
+    }
+  };
+
+  // Pulls fresh Plaid data for just this institution (POST /api/plaid/sync,
+  // scoped by the institution key), then re-fetches the list so last-synced
+  // + health dot/reason update in place. Menu stays open while syncing so
+  // the label can show progress; only closes on success. Demo installs (no
+  // Plaid keys) 503 "plaid-not-configured" — treated as success here too,
+  // same as the button this replaced.
+  const resyncInstitution = async (name: string) => {
+    setResyncing(name);
+    setResyncError(null);
+    try {
+      const res = await fetch("/api/plaid/sync", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ institution: name }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      const body = await res.json().catch(() => ({}));
+      if (res.ok || body.error === "plaid-not-configured") {
+        setMenuFor(null);
+        load();
+        return;
+      }
+      setResyncError(name);
+    } catch {
+      setResyncError(name);
+    } finally {
+      setResyncing(null);
     }
   };
 
@@ -658,6 +694,34 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                           borderRadius: 10, boxShadow: "0 8px 30px rgba(16,17,20,.12)",
                         }}
                       >
+                        {/* Re-sync — only for rows that are actually Plaid-linked.
+                            Placeholder rows (health="stale", healthReason="Not
+                            linked", set when zero items exist yet) have nothing
+                            to sync. */}
+                        {inst.healthReason !== "Not linked" && (
+                          <button
+                            onClick={() => resyncInstitution(inst.name)}
+                            disabled={resyncing === inst.name}
+                            style={{
+                              all: "unset",
+                              cursor: resyncing === inst.name ? "default" : "pointer",
+                              display: "block",
+                              padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                              color: resyncError === inst.name ? BAD : INK,
+                              borderRadius: 8, whiteSpace: "nowrap",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (resyncing !== inst.name) (e.currentTarget as HTMLElement).style.background = SOFT;
+                            }}
+                            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                          >
+                            {resyncing === inst.name
+                              ? "Syncing…"
+                              : resyncError === inst.name
+                                ? "Re-sync failed — try again"
+                                : "Re-sync"}
+                          </button>
+                        )}
                         <button
                           onClick={() => { setMenuFor(null); setConfirmDelete(inst.name); }}
                           style={{

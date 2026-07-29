@@ -54,7 +54,13 @@ async function backfillBranding(client: PlaidApi, d: Database.Database) {
   }
 }
 
-export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcome> {
+// `institution` scopes the sync to one connection (Connections view's
+// per-row Re-sync) — same key remove/revoke identify an institution by
+// (app/api/connections/route.ts DELETE: `WHERE institution = ?`), since
+// items carry no id the client ever sees. Omitted/undefined → every item,
+// preserving the existing no-arg callers (scripts/cli.ts `cli sync`, the
+// route's own default POST) unchanged.
+export async function runPlaidSync(dArg?: Database.Database, institution?: string): Promise<SyncOutcome> {
   const client = getPlaidClient();
   if (!client) return { configured: false };
 
@@ -67,9 +73,15 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
 
   await backfillBranding(client, d);
 
-  const items = d
-    .prepare(`SELECT id, plaid_item_id, access_token, cursor FROM items WHERE status != 'removed'`)
-    .all() as { id: number; plaid_item_id: string; access_token: string; cursor: string | null }[];
+  const items = (
+    institution
+      ? d
+          .prepare(`SELECT id, plaid_item_id, access_token, cursor FROM items WHERE status != 'removed' AND institution = ?`)
+          .all(institution)
+      : d
+          .prepare(`SELECT id, plaid_item_id, access_token, cursor FROM items WHERE status != 'removed'`)
+          .all()
+  ) as { id: number; plaid_item_id: string; access_token: string; cursor: string | null }[];
 
   let synced = 0;
   const errors: string[] = [];
@@ -80,8 +92,8 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
   `);
 
   const upsertTransaction = d.prepare(`
-    INSERT INTO transactions (account_id, plaid_txn_id, date, name, merchant, amount, pending)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO transactions (account_id, plaid_txn_id, date, name, merchant, amount, pending, pfc)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(plaid_txn_id) DO NOTHING
   `);
 
@@ -139,7 +151,9 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
             .get(txn.account_id) as { id: number } | undefined;
           if (!row) continue;
           // amount in Plaid: positive = debit (money out), negative = credit.
-          // Store as-is; the budget view handles sign convention.
+          // Store as-is; the budget view handles sign convention. pfc
+          // (personal_finance_category.detailed) is the strongest
+          // transfer/income signal for the classify pass.
           upsertTransaction.run(
             row.id,
             txn.transaction_id,
@@ -148,6 +162,7 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
             txn.merchant_name ?? txn.name,
             txn.amount,
             txn.pending ? 1 : 0,
+            txn.personal_finance_category?.detailed ?? txn.personal_finance_category?.primary ?? null,
           );
         }
 
@@ -165,6 +180,7 @@ export async function runPlaidSync(dArg?: Database.Database): Promise<SyncOutcom
             txn.merchant_name ?? txn.name,
             txn.amount,
             txn.pending ? 1 : 0,
+            txn.personal_finance_category?.detailed ?? txn.personal_finance_category?.primary ?? null,
           );
         }
 

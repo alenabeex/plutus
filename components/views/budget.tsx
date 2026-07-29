@@ -536,12 +536,6 @@ export default function BudgetView({
 
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
-  // Header ··· menu's "Sync accounts" item — pulls fresh Plaid data for every
-  // linked institution, then refetches this month so tiles/rows/grade update.
-  // Separate from "Sync Month" above: that un-gates one backfilled month
-  // locally, this talks to Plaid.
-  const [syncingAccounts, setSyncingAccounts] = useState(false);
-  const [accountsSyncError, setAccountsSyncError] = useState(false);
 
   // month changed → reset loading/drill-down state during render (not in the
   // effect) so the lint-checked effect below only fetches
@@ -554,8 +548,6 @@ export default function BudgetView({
     setCategoryPickerOpen(false);
     setGatedTxnCount(0);
     setSyncError(null);
-    setSyncingAccounts(false);
-    setAccountsSyncError(false);
     setEditing(false);
     setEditCat(null);
     setEditingSavings(false);
@@ -607,35 +599,6 @@ export default function BudgetView({
       setSyncing(false);
     }
   }, [month, onLocked, onMonthsChanged]);
-
-  // "Sync accounts" (header ··· menu) — pulls fresh data for every linked
-  // institution via the existing POST /api/plaid/sync (lib/sync.ts's
-  // runPlaidSync, already wired for CLI use — this is its first UI caller),
-  // then refetches this month so tiles/rows/grade update. Menu stays open
-  // while syncing so the label can show progress; only closes on success.
-  // Demo installs (no Plaid keys in Keychain) get a 503 "plaid-not-configured"
-  // from the route — that's not a failure here: GET's own lazy derivation
-  // pass still gives the refetch meaning even with nothing to pull, so the
-  // button "works" in demo the same as everywhere else in the app.
-  const onSyncAccounts = useCallback(async () => {
-    setSyncingAccounts(true);
-    setAccountsSyncError(false);
-    try {
-      const res = await fetch("/api/plaid/sync", { method: "POST", credentials: "same-origin" });
-      if (res.status === 401) { onLocked(); return; }
-      const body = await res.json().catch(() => ({}));
-      if (res.ok || body.error === "plaid-not-configured") {
-        setPlusOpen(false);
-        await loadMonth();
-        return;
-      }
-      setAccountsSyncError(true);
-    } catch {
-      setAccountsSyncError(true);
-    } finally {
-      setSyncingAccounts(false);
-    }
-  }, [onLocked, loadMonth]);
 
   // ── fetch on global month change ───────────────────────────────────────────
   useEffect(() => {
@@ -758,8 +721,8 @@ export default function BudgetView({
         <div ref={plusRef} className="relative">
           <button
             type="button"
-            aria-label="More actions"
-            title="More actions"
+            aria-label="Export"
+            title="Export this month (.xlsx)"
             className="flex h-8 w-8 items-center justify-center rounded-full"
             style={{ border: `1px solid ${LINE}`, background: CARD, color: MUTED }}
             onClick={() => setPlusOpen((o) => !o)}
@@ -772,19 +735,6 @@ export default function BudgetView({
                 borderRadius: 14, boxShadow: "0 8px 30px rgba(16,17,20,.12)", width: 230,
               }}
             >
-              <button
-                style={{
-                  ...menuItem,
-                  color: accountsSyncError ? BAD : INK,
-                  cursor: syncingAccounts ? "default" : "pointer",
-                }}
-                disabled={syncingAccounts}
-                onClick={onSyncAccounts}
-                onMouseEnter={(e) => { if (!syncingAccounts) (e.currentTarget as HTMLElement).style.background = SOFT; }}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-              >
-                {syncingAccounts ? "Syncing…" : accountsSyncError ? "Sync failed — try again" : "Sync accounts"}
-              </button>
               {!notFound && (
                 <button style={menuItem}
                   onClick={() => { setPlusOpen(false); window.location.href = `/api/budget/export?month=${month}`; }}
