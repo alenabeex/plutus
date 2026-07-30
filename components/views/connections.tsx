@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { AssetIcon } from "@/components/asset-icon";
 import { usd0 } from "@/lib/format";
 import type { ConnectionsData } from "@/lib/types";
-import { CARD } from "@/lib/styles";
+import { CARD, MENU_ITEM, menuItemHover } from "@/lib/styles";
 import {
   ASSET_ICON_KEYS,
   ASSET_ICON_LABELS,
@@ -327,25 +327,15 @@ function ManualAssetRow({ id, label, value, icon, isLast, onSaved, onLocked }: M
           >
             <button
               onClick={() => { setMenuOpen(false); setEditing(true); }}
-              style={{
-                all: "unset", cursor: "pointer", display: "block",
-                padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                color: INK, borderRadius: 8, whiteSpace: "nowrap",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+              style={{ ...MENU_ITEM, whiteSpace: "nowrap" }}
+              {...menuItemHover}
             >
               Edit…
             </button>
             <button
               onClick={() => { setMenuOpen(false); setConfirmRemove(true); }}
-              style={{
-                all: "unset", cursor: "pointer", display: "block",
-                padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                color: BAD, borderRadius: 8, whiteSpace: "nowrap",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+              style={{ ...MENU_ITEM, color: BAD, whiteSpace: "nowrap" }}
+              {...menuItemHover}
             >
               Remove…
             </button>
@@ -703,12 +693,10 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                             onClick={() => resyncInstitution(inst.name)}
                             disabled={resyncing === inst.name}
                             style={{
-                              all: "unset",
+                              ...MENU_ITEM,
                               cursor: resyncing === inst.name ? "default" : "pointer",
-                              display: "block",
-                              padding: "6px 14px", fontSize: 12, fontWeight: 600,
                               color: resyncError === inst.name ? BAD : INK,
-                              borderRadius: 8, whiteSpace: "nowrap",
+                              whiteSpace: "nowrap",
                             }}
                             onMouseEnter={(e) => {
                               if (resyncing !== inst.name) (e.currentTarget as HTMLElement).style.background = SOFT;
@@ -724,13 +712,8 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                         )}
                         <button
                           onClick={() => { setMenuFor(null); setConfirmDelete(inst.name); }}
-                          style={{
-                            all: "unset", cursor: "pointer", display: "block",
-                            padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                            color: BAD, borderRadius: 8, whiteSpace: "nowrap",
-                          }}
-                          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                          style={{ ...MENU_ITEM, color: BAD, whiteSpace: "nowrap" }}
+                          {...menuItemHover}
                         >
                           Remove…
                         </button>

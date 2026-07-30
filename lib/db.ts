@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { dbKey } from "./keychain";
-import { DEMO_SEED, DEFAULT_CATEGORIES, type SeedConfig } from "./seed-config";
+import { DEMO_SEED, DEFAULT_CATEGORIES, NEED_CATEGORIES, type SeedConfig } from "./seed-config";
 import { gradeFor } from "./format";
 
 // Data NEVER lives in the vault/git — ~/FinanceTracker/ only (plan §Decisions).
@@ -127,6 +127,25 @@ function migrate(d: Database.Database) {
   if (!acctCols.has("mask")) d.exec(`ALTER TABLE accounts ADD COLUMN mask TEXT`);
   if (!acctCols.has("nickname")) d.exec(`ALTER TABLE accounts ADD COLUMN nickname TEXT`);
 
+  // v4: Cash Flow derivation contract (plan §Phase 4 revision 2026-07-25).
+  // - transactions.txn_class: 'income' | 'expense' | 'transfer' | NULL
+  //   (NULL = not yet classified; the classify pass in lib/derive fills it).
+  // - transactions.pfc: Plaid personal_finance_category primary, captured at
+  //   sync — the strongest transfer/income signal when present.
+  // - categories.grp: 'need' | 'want' — Needs vs Wants split in Cash Flow.
+  // - accounts.cashflow_role: NULL = auto by kind; manual override later
+  //   ('income' | 'spending' | 'both' | 'exclude').
+  const txnCols = new Set(
+    (d.prepare(`PRAGMA table_info(transactions)`).all() as { name: string }[]).map((c) => c.name),
+  );
+  if (!txnCols.has("txn_class")) d.exec(`ALTER TABLE transactions ADD COLUMN txn_class TEXT`);
+  if (!txnCols.has("pfc")) d.exec(`ALTER TABLE transactions ADD COLUMN pfc TEXT`);
+  const catCols = new Set(
+    (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
+  );
+  if (!catCols.has("grp")) d.exec(`ALTER TABLE categories ADD COLUMN grp TEXT DEFAULT 'want'`);
+  if (!acctCols.has("cashflow_role")) d.exec(`ALTER TABLE accounts ADD COLUMN cashflow_role TEXT`);
+
   // v3: manual assets carry an icon key (lib/asset-icons) so their rows read
   // like the Plaid ones — avatar + title — instead of a bare grey label.
   // Rows created before this column fall back to a label-keyword guess.
@@ -134,6 +153,19 @@ function migrate(d: Database.Database) {
     (d.prepare(`PRAGMA table_info(manual_assets)`).all() as { name: string }[]).map((c) => c.name),
   );
   if (!manCols.has("icon")) d.exec(`ALTER TABLE manual_assets ADD COLUMN icon TEXT`);
+
+  // Cash Flow taxonomy upkeep — runs every start so pre-v4 databases (and
+  // fresh ones) converge on the same category set + need/want grouping.
+  // INSERT OR IGNORE: user-added categories and existing rows are untouched;
+  // only grp is normalized for the known names.
+  const insCat = d.prepare(`INSERT OR IGNORE INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
+  const setGrp = d.prepare(`UPDATE categories SET grp = ? WHERE name = ?`);
+  DEFAULT_CATEGORIES.forEach((name, i) => {
+    const grp = (NEED_CATEGORIES as readonly string[]).includes(name) ? "need" : "want";
+    insCat.run(name, i, grp);
+    setGrp.run(grp, name);
+  });
+  d.prepare(`UPDATE categories SET grp = 'want' WHERE grp IS NULL`).run();
 
   // Heal both halves of a half-finished removal. The old connections DELETE
   // handler ran outside a transaction, so when its item delete hit the
@@ -193,14 +225,9 @@ function seed(d: Database.Database) {
   const cfg = loadSeedConfig();
   const today = new Date().toISOString().slice(0, 10);
 
-  // Blank install: categories only (app scaffolding, needed before any
-  // transaction can be categorized). No accounts, no connections, no
-  // months, no subscriptions — the user links their own bank.
-  if (!cfg) {
-    const insCat = d.prepare(`INSERT INTO categories (name,sort) VALUES (?,?)`);
-    DEFAULT_CATEGORIES.forEach((c, i) => insCat.run(c, i));
-    return;
-  }
+  // Blank install: nothing to seed — the default categories are guaranteed
+  // by migrate()'s taxonomy upkeep, and the user links their own bank.
+  if (!cfg) return;
 
   const insAcct = d.prepare(
     `INSERT INTO accounts (code,name,institution,sub,kind,is_liability,mask) VALUES (?,?,?,?,?,?,?)`,
@@ -219,8 +246,29 @@ function seed(d: Database.Database) {
     }
   }
 
-  const insCat = d.prepare(`INSERT INTO categories (name,sort) VALUES (?,?)`);
+  // migrate() already guaranteed the defaults; this only adds custom ones
+  // from a personal seed.local.json.
+  const insCat = d.prepare(`INSERT OR IGNORE INTO categories (name,sort) VALUES (?,?)`);
   cfg.categories.forEach((c, i) => insCat.run(c, i));
+
+  if (cfg.transactions?.length) {
+    const acctByCode = d.prepare(
+      `SELECT id FROM accounts WHERE code = ? AND (mask = ? OR (? IS NULL AND mask IS NULL)) LIMIT 1`,
+    );
+    const insTxn = d.prepare(
+      `INSERT INTO transactions (account_id, date, name, merchant, amount, pending) VALUES (?,?,?,?,?,0)`,
+    );
+    const now = new Date();
+    for (const t of cfg.transactions) {
+      const row = acctByCode.get(t.accountCode, t.accountMask ?? null, t.accountMask ?? null) as
+        { id: number } | undefined;
+      if (!row) continue;
+      const m = new Date(now.getFullYear(), now.getMonth() + t.monthOffset, 1);
+      const day = Math.min(t.day, new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate());
+      const date = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      insTxn.run(row.id, date, t.name, t.merchant, t.amount);
+    }
+  }
 
   const insMonth = d.prepare(
     `INSERT INTO budget_months (month,income_json,tax_set_aside,variable_json,total_income,total_fixed,total_variable,savings,cash_pct,cash_amt,invested_pct,invested_amt,grade,source)
@@ -250,7 +298,35 @@ function seed(d: Database.Database) {
     insSub.run(s.name, s.amount, s.day, s.cadence, s.kind, s.renewal, s.approx);
   }
 
-  snapshotNetworth(d);
+  const nowSnap = snapshotNetworth(d);
+
+  // Demo-only history backfill: a fresh install (real or demo) otherwise
+  // starts with exactly one net-worth snapshot — today's — so the trend
+  // chart is a single dot. Gated to DEMO_SEED specifically (never
+  // seed.local.json) so a real user's database never gains fabricated
+  // history; their chart legitimately builds one real day at a time.
+  // Biweekly points over ~6 months, gentle upward drift + small deterministic
+  // wobble (no Math.random — reproducible across reseeds), landing exactly
+  // on today's real seeded total.
+  if (DEMO) {
+    const insSnap = d.prepare(
+      `INSERT OR IGNORE INTO networth_snapshots (date,assets,liabilities,total) VALUES (?,?,?,?)`,
+    );
+    const POINTS = 13;
+    const todayD = new Date();
+    for (let i = POINTS; i >= 1; i--) {
+      const past = new Date(todayD);
+      past.setDate(past.getDate() - i * 14);
+      const date = past.toISOString().slice(0, 10);
+      const progress = (POINTS - i) / POINTS; // 0 at oldest → ~1 near today
+      const drift = 1 - 0.09 * (1 - progress); // starts ~9% below today, rises to it
+      const assetWobble = 1 + Math.sin(i * 1.7) * 0.012;
+      const liabWobble = 1 + Math.sin(i * 2.3) * 0.05;
+      const assets = round2(nowSnap.assets * drift * assetWobble);
+      const liabilities = round2(nowSnap.liabilities * liabWobble);
+      insSnap.run(date, assets, liabilities, round2(assets - liabilities));
+    }
+  }
 }
 
 /* ============================================================

@@ -43,9 +43,10 @@ export interface ConnectionsData {
 
 export interface CashflowTxn {
   id: number;
-  date: string;   // '2026-07-21'
-  label: string;  // merchant if set, else name
-  value: number;  // display sign: positive dollars for both income and expenses
+  date: string;    // '2026-07-21'
+  label: string;   // merchant if set, else name
+  value: number;   // display sign: positive dollars for both income and expenses
+  account: string; // source account, 'Chase Checking ···1187' — '' when unknown
 }
 
 export interface CashflowRow {

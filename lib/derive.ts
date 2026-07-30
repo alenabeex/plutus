@@ -302,13 +302,17 @@ export interface DerivedCashflowView {
 export function cashflowView(month: string, d: Database.Database = db()): DerivedCashflowView {
   const rows = d.prepare(
     `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
-            t.amount, t.txn_class, c.name cat, c.grp
-     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+            t.amount, t.txn_class, c.name cat, c.grp,
+            COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct, a.mask
+     FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN accounts a ON a.id = t.account_id
      WHERE t.pending = 0 AND t.date LIKE ? AND t.txn_class IN ('income', 'expense', 'saved', 'excluded')
      ORDER BY t.date DESC, t.id DESC`,
   ).all(`${month}%`) as {
     id: number; date: string; label: string; amount: number;
     txn_class: "income" | "expense" | "saved" | "excluded"; cat: string | null; grp: string | null;
+    acct: string | null; mask: string | null;
   }[];
 
   const incomeBy = new Map<string, CashflowRow>();
@@ -321,15 +325,18 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   let totalNeeds = 0;
 
   for (const r of rows) {
+    // Source account for the drill-down row: nickname/name + masked digits.
+    // Empty for manual txns with no account — the view skips the segment.
+    const account = r.acct ? `${r.acct}${r.mask ? ` ···${r.mask}` : ""}` : "";
     if (r.txn_class === "excluded") {
-      disputedTxns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount) });
+      disputedTxns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount), account });
       disputedTotal = round2(disputedTotal + r.amount);
       continue;
     }
     if (r.txn_class === "income") {
       const row = incomeBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
       row.value = round2(row.value + -r.amount);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(-r.amount) });
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(-r.amount), account });
       incomeBy.set(r.label, row);
     } else if (r.txn_class === "saved") {
       // grouped by destination (merchant/name). Sign-agnostic on purpose:
@@ -338,13 +345,13 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       const v = round2(Math.abs(r.amount));
       const row = savedBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
       row.value = round2(row.value + v);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: v });
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: v, account });
       savedBy.set(r.label, row);
     } else {
       const key = r.cat ?? "Uncategorized";
       const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp: r.grp === "need" ? "need" : "want" };
       row.value = round2(row.value + r.amount);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount) });
+      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount), account });
       expenseBy.set(key, row);
       if (r.grp === "need") totalNeeds = round2(totalNeeds + r.amount);
     }

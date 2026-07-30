@@ -257,14 +257,13 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
 
 interface DonutProps {
   allocation: NetworthData["allocation"];
-  allocation30d: string;
   animate: boolean;
   /** hovered/selected group label — highlights its arc, center shows its share */
   focus: string | null;
   onFocus: (label: string | null) => void;
 }
 
-function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: DonutProps) {
+function DonutChart({ allocation, animate, focus, onFocus }: DonutProps) {
   const r = 60;
   const C = 2 * Math.PI * r;
   const total = allocation.reduce((s, a) => s + a.value, 0) || 1;
@@ -314,10 +313,10 @@ function DonutChart({ allocation, allocation30d, animate, focus, onFocus }: Donu
       ) : (
         <>
           <text x={80} y={76} textAnchor="middle" fontSize={15} fontWeight={700} fill={INK}>
-            {allocation30d}
+            100%
           </text>
           <text x={80} y={93} textAnchor="middle" fontSize={10} fill={MUTED}>
-            30-day
+            total
           </text>
         </>
       )}
@@ -342,25 +341,44 @@ function AccountRow({
   onLocked: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingValue, setPendingValue] = useState<string | null>(null);
   const renamable = item.kind !== "manual";
-  // When two accounts share a name the last four moves up beside the name,
-  // where it does the disambiguating — so the subtitle drops it rather than
-  // printing the same four digits twice on one row.
   const maskInName = Boolean(item.ambiguous && item.mask);
   const subMask = !maskInName && item.mask ? `···${item.mask}` : "";
 
   const save = async (raw: string) => {
-    setEditing(false);
     const nickname = raw.trim();
-    if (nickname === item.name) return;
-    const res = await fetch("/api/networth", {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: item.id, nickname: nickname || null }),
-    });
-    if (res.status === 401) { onLocked(); return; }
-    onSaved();
+    if (nickname === item.name) {
+      setEditing(false);
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    setPendingValue(nickname);
+    try {
+      const res = await fetch("/api/networth", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: item.id, nickname: nickname || null }),
+      });
+      if (res.status === 401) {
+        onLocked();
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Server error (${res.status})`);
+      }
+      setEditing(false);
+      setPendingValue(null);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save account name");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -400,24 +418,42 @@ function AccountRow({
       {/* .who — title + subtitle, one line each, truncate overflow */}
       <span className="min-w-0 flex-1">
         {editing ? (
-          <input
-            key={item.name}
-            type="text"
-            autoFocus
-            defaultValue={item.name}
-            onBlur={(e) => save(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            className="block w-full py-0.5 px-1.5 text-body font-semibold"
-            style={{
-              border: `1px solid ${MUTED}`,
-              borderRadius: 6,
-              color: INK,
-              background: "#fff",
-            }}
-          />
+          <div>
+            <input
+              key={item.name}
+              type="text"
+              autoFocus
+              disabled={saving}
+              defaultValue={item.name}
+              onBlur={(e) => save(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setEditing(false);
+              }}
+              className="block w-full py-0.5 px-1.5 text-body font-semibold"
+              style={{
+                border: `1px solid ${error ? "#b04a3f" : MUTED}`,
+                borderRadius: 6,
+                color: INK,
+                background: "#fff",
+                opacity: saving ? 0.6 : 1,
+              }}
+            />
+            {error && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-xs2" style={{ color: "#b04a3f" }}>{error}</span>
+                <button
+                  type="button"
+                  onClick={() => pendingValue && save(pendingValue)}
+                  disabled={saving}
+                  className="text-xs2 font-semibold"
+                  style={{ color: "#16181d", cursor: "pointer", textDecoration: "underline" }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <b
             className="block text-body font-semibold truncate"
@@ -685,7 +721,6 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
           <div className="flex items-center gap-4">
             <DonutChart
               allocation={data.allocation}
-              allocation30d={data.allocation30d}
               animate={animated}
               focus={allocFocus}
               onFocus={setAllocFocus}

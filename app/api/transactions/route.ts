@@ -20,10 +20,14 @@ export const runtime = "nodejs";
 //    categoryId so the txn lands in a real category instead of
 //    Uncategorized. classifyTransactions only fills NULL txn_class rows,
 //    so a manual move sticks across syncs.
+//  - "rename": override the transaction's display label. Writes `merchant`
+//    (the display COALESCE prefers it), so future rule-learning keys on the
+//    name the user actually recognizes.
 type Body =
   | { id: number; action: "category"; categoryId: number }
   | { id: number; action: "dispute" }
-  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed"; categoryId?: number };
+  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed"; categoryId?: number }
+  | { id: number; action: "rename"; label: string };
 
 export const PUT = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
@@ -99,6 +103,17 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       d.prepare(`UPDATE transactions SET txn_class = ?, category_id = NULL WHERE id = ?`)
         .run(to, body.id);
     }
+    return withRefreshedSession(req, { ok: true });
+  }
+
+  if (body.action === "rename") {
+    const label = typeof (body as { label?: string }).label === "string"
+      ? (body as { label: string }).label.trim()
+      : "";
+    if (!label || label.length > 80) {
+      return NextResponse.json({ ok: false, error: "Label must be 1–80 characters" }, { status: 400 });
+    }
+    d.prepare(`UPDATE transactions SET merchant = ? WHERE id = ?`).run(label, body.id);
     return withRefreshedSession(req, { ok: true });
   }
 

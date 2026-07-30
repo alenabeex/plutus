@@ -29,21 +29,40 @@ export interface SeedSubscription {
   kind: "subscription" | "bill" | "fee";
   renewal: string | null; approx: 0 | 1;
 }
+/** Demo/bootstrap transaction. `monthOffset` is relative to the seed month
+ *  (0 = current, -1 = last month …) so demo data always covers "now". */
+export interface SeedTransaction {
+  accountCode: string;   // matches SeedAccount.code (+ mask when ambiguous)
+  accountMask?: string;
+  monthOffset: number;
+  day: number;
+  name: string;
+  merchant: string;
+  amount: number;        // Plaid convention: positive = money out
+}
 export interface SeedConfig {
   accounts: SeedAccount[];
   categories: string[];
   budgetMonths: SeedBudgetMonth[];
   subscriptions: SeedSubscription[];
+  transactions?: SeedTransaction[];
 }
 
-// Variable-spend categories. App scaffolding, not user data — a blank
-// install seeds these and nothing else, so transactions have somewhere to
-// land before the user has linked anything.
-export const DEFAULT_CATEGORIES = [
+// Spend categories. App scaffolding, not user data — a blank install seeds
+// these and nothing else, so transactions have somewhere to land before the
+// user has linked anything. Split into two groups (Cash Flow contract):
+//   need — recurring obligations: housing, utilities, insurance, subscriptions
+//   want — discretionary: everything else, AI/rules-categorized
+export const NEED_CATEGORIES = [
+  "Rent / Housing", "Utilities", "Phone / Internet", "Insurance",
+  "Medical / Health", "Apps / Subs",
+];
+export const WANT_CATEGORIES = [
   "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",
   "Pets", "Gifts", "Car Gas", "Travel / Parking", "Shopping / Personal",
-  "Education / Training", "Apps / Subs", "Interest Fees / Violations",
+  "Education / Training", "Interest Fees / Violations",
 ];
+export const DEFAULT_CATEGORIES = [...NEED_CATEGORIES, ...WANT_CATEGORIES];
 
 // Grade computation lives in lib/format.ts (gradeFor) — single source.
 
@@ -52,6 +71,9 @@ export const DEMO_SEED: SeedConfig = {
   accounts: [
     { code: "CH", name: "Demo Checking", institution: "First Bank", sub: "First Bank", kind: "cash", is_liability: 0, value: 4200.0 },
     { code: "SV", name: "High-Yield Savings", institution: "Marcus", sub: "Marcus", kind: "cash", is_liability: 0, value: 12500.0 },
+    // Venmo: cash kind but a SPENDING source in the Cash Flow contract —
+    // inflows there are reimbursements/transfers, never income.
+    { code: "VM", name: "Venmo", institution: "Venmo", sub: "Venmo", kind: "cash", is_liability: 0, value: 86.4 },
     { code: "BT", name: "Bitcoin", institution: "", sub: "0.10 BTC", kind: "manual", is_liability: 0, value: 6800.0, manualLabel: "Bitcoin · 0.10 BTC" },
     { code: "CC", name: "Comic Collection", institution: "", sub: "", kind: "manual", is_liability: 0, value: 350.0, manualLabel: "Comic Collection" },
     { code: "VG", name: "Brokerage", institution: "Vanguard", sub: "Vanguard", kind: "investment", is_liability: 0, value: 22400.0 },
@@ -65,11 +87,7 @@ export const DEMO_SEED: SeedConfig = {
     { code: "SB", name: "CREDIT CARD", institution: "Second Bank", sub: "Premier Rewards", kind: "credit", is_liability: 1, value: -310.4, mask: "6612" },
     { code: "SB", name: "CREDIT CARD", institution: "Second Bank", sub: "Premier Rewards", kind: "credit", is_liability: 1, value: -1875.6, mask: "9908" },
   ],
-  categories: [
-    "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",
-    "Pets", "Gifts", "Car Gas", "Travel / Parking", "Shopping / Personal",
-    "Education / Training", "Apps / Subs", "Interest Fees / Violations",
-  ],
+  categories: DEFAULT_CATEGORIES,
   budgetMonths: [
     {
       month: "2026-01",
@@ -101,4 +119,44 @@ export const DEMO_SEED: SeedConfig = {
     { name: "Utilities", amount: 140.0, day: 20, cadence: "monthly", kind: "bill", renewal: null, approx: 1 },
     { name: "Travel Card", amount: 95.0, day: 12, cadence: "annual", kind: "fee", renewal: "Apr", approx: 0 },
   ],
+  // Fake ledger exercising every Cash Flow classification path:
+  //   income (payroll into checking) · needs paid from checking (rent, PG&E,
+  //   internet) · needs on the card (streaming) · wants on the card
+  //   (groceries, eat out, gas, shopping) · Venmo spend · a checking↔card
+  //   autopay TRANSFER PAIR that must cancel out of both sides · one
+  //   unknown merchant that stays uncategorized until a rule/AI names it.
+  transactions: demoLedger(),
 };
+
+function demoLedger(): SeedTransaction[] {
+  const monthly: Omit<SeedTransaction, "monthOffset">[] = [
+    // income → Demo Checking (Plaid: negative = money in)
+    { accountCode: "CH", day: 1,  name: "ACME CORP DIRECT DEP PAYROLL", merchant: "Acme Corp", amount: -2600.0 },
+    { accountCode: "CH", day: 15, name: "ACME CORP DIRECT DEP PAYROLL", merchant: "Acme Corp", amount: -2600.0 },
+    // needs paid straight from checking
+    { accountCode: "CH", day: 2,  name: "OAKWOOD PROPERTIES RENT ACH", merchant: "Oakwood Properties", amount: 1850.0 },
+    { accountCode: "CH", day: 18, name: "PG&E WEB ONLINE PAYMENT", merchant: "PG&E", amount: 138.7 },
+    { accountCode: "CH", day: 8,  name: "COMCAST XFINITY INTERNET", merchant: "Comcast", amount: 60.0 },
+    // transfer pair: checking pays the Travel Card — must vanish from BOTH sides
+    { accountCode: "CH", day: 20, name: "FIRST BANK CREDIT CRD AUTOPAY", merchant: "First Bank Card Payment", amount: 640.25 },
+    { accountCode: "TC", accountMask: "1187", day: 20, name: "PAYMENT THANK YOU - WEB", merchant: "Payment Thank You", amount: -640.25 },
+    // needs on the card
+    { accountCode: "TC", accountMask: "1187", day: 12, name: "STREAMFLIX.COM SUBSCRIPTION", merchant: "Netflix", amount: 15.99 },
+    // wants on the card
+    { accountCode: "TC", accountMask: "1187", day: 4,  name: "TRADER JOE'S #112", merchant: "Trader Joe's", amount: 84.3 },
+    { accountCode: "TC", accountMask: "1187", day: 16, name: "TRADER JOE'S #112", merchant: "Trader Joe's", amount: 91.15 },
+    { accountCode: "RC", accountMask: "2043", day: 6,  name: "DOORDASH*THAI PALACE", merchant: "DoorDash", amount: 38.6 },
+    { accountCode: "RC", accountMask: "2043", day: 21, name: "SHELL OIL 5744", merchant: "Shell", amount: 52.4 },
+    { accountCode: "RC", accountMask: "2043", day: 24, name: "AMAZON MKTPL*88YT2", merchant: "Amazon", amount: 47.9 },
+    // Venmo = spending source; its cash-in is a transfer, never income
+    { accountCode: "VM", day: 10, name: "VENMO PAYMENT SAM R", merchant: "Venmo", amount: 45.0 },
+    { accountCode: "VM", day: 11, name: "VENMO CASHOUT FROM BANK", merchant: "Venmo", amount: -60.0 },
+    // unknown merchant → uncategorized queue until a rule or AI names it
+    { accountCode: "RC", accountMask: "2043", day: 14, name: "BLUE TOKAI ROASTERS SF", merchant: "Blue Tokai Roasters", amount: 21.5 },
+  ];
+  const out: SeedTransaction[] = [];
+  for (const monthOffset of [-2, -1, 0]) {
+    for (const t of monthly) out.push({ ...t, monthOffset });
+  }
+  return out;
+}

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
+import { MENU_ITEM, menuItemHover } from "@/lib/styles";
 import { usd, gradeFor } from "@/lib/format";
 import type { CashflowData, CashflowRow, CashflowTxn } from "@/lib/types";
 
@@ -84,32 +85,53 @@ export type OnTxnAction = (
   opts?: TxnActionOpts,
 ) => void;
 
+// Destination chip — shared by the picker modal's sections.
+function destChip(label: string, onClick: () => void, color?: string) {
+  return (
+    <button
+      key={label}
+      type="button"
+      className="rounded-full px-2.5 py-1 text-xs2"
+      style={{ border: `1px solid ${LINE}`, color: color ?? MUTED, cursor: "pointer" }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Where a txn lives right now, as a display label. */
+function areaLabel(area: CashflowArea, rowLabel: string): string {
+  return area === "income" ? "Income"
+    : area === "saved" ? "Savings"
+    : area === "disputed" ? "Disputed"
+    : rowLabel;
+}
+
 // Actions popover for one transaction — anchored to its own ⋯ button so
 // each txn row owns its outside-click-close listener independently (same
 // idiom as the header's Export popover / plusRef, just one instance per
-// row instead of one for the whole view). One control (spec Alena
-// 2026-07-28): title "Category", a pill showing where the txn currently
-// lives (Income / Saved / Disputed / its category), whose chevron expands
-// EVERY destination — all categories first, then Income, Saved, and
-// Disputed last (red). Disputed is just another destination: it files the
-// txn into the Disputed folder at the bottom of Expenses instead of
-// deleting it from view. No standalone action links.
+// row instead of one for the whole view). One line (spec Alena 2026-07-29):
+// [Rename] [current-location ▾]. Rename swaps the line for an input; the
+// pill opens the TxnPickerModal — destinations live in their own modal,
+// grouped Income / Needs / Wants / Savings / Disputed, not inline here.
 function TxnRow({
-  t, rowLabel, area, categories, isOpen, categoryPickerOpen,
-  onToggle, onClose, onToggleCategoryPicker, onTxnAction,
+  t, rowLabel, area, isOpen,
+  onToggle, onClose, onOpenPicker, onRename,
 }: {
   t: CashflowTxn;
   rowLabel: string;
   area: CashflowArea;
-  categories: { id: number; name: string; grp: "need" | "want" }[];
   isOpen: boolean;
-  categoryPickerOpen: boolean;
   onToggle: () => void;
   onClose: () => void;
-  onToggleCategoryPicker: () => void;
-  onTxnAction: OnTxnAction;
+  onOpenPicker: () => void;
+  onRename: (label: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -127,36 +149,25 @@ function TxnRow({
     };
   }, [isOpen, onClose]);
 
-  const isExpense = area === "expense";
-  const chipCats = isExpense ? categories.filter((c) => c.name !== rowLabel) : categories;
-  const pill: React.CSSProperties = {
-    border: `1px solid ${LINE}`, color: MUTED, cursor: "pointer",
-  };
-  // Where the txn lives right now — the pill's face
-  const currentLabel =
-    area === "income" ? "Income"
-    : area === "saved" ? "Savings"
-    : area === "disputed" ? "Disputed"
-    : rowLabel;
-  const chip = (label: string, onClick: () => void, color?: string) => (
-    <button
-      key={label}
-      type="button"
-      className="rounded-full px-2.5 py-1 text-xs2"
-      style={{ border: `1px solid ${LINE}`, color: color ?? MUTED, cursor: "pointer" }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
-      onClick={onClick}
-    >
-      {label}
-    </button>
-  );
+  // popover closed → next open starts on the action rows, not a stale input
+  if (!isOpen && renaming) setRenaming(false);
 
   return (
-    <div className="flex items-center gap-3 px-1 py-1 text-xs2" style={{ color: MUTED }}>
-      <div className="flex min-w-0 flex-1 justify-between">
-        <span className="truncate">{t.date.slice(5)} · {t.label}</span>
-        <span className="num">{usd(t.value)}</span>
+    <div
+      className="flex items-center gap-3 rounded-lg px-1 py-1 text-xs2"
+      style={{ color: MUTED }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {/* proportional columns: account starts at a consistent x across
+            rows, pulled left toward the merchant instead of hugging the
+            amount (Alena, 2026-07-29) */}
+        <span className="min-w-0 flex-[3] truncate">{t.date.slice(5)} · {t.label}</span>
+        <span className="hidden min-w-0 flex-[2] truncate sm:block" style={{ opacity: 0.75 }}>
+          {t.account}
+        </span>
+        <span className="num shrink-0">{usd(t.value)}</span>
       </div>
       <div ref={menuRef} className="relative w-9 text-right">
         <button
@@ -170,40 +181,50 @@ function TxnRow({
             className="absolute right-0 z-20 p-2"
             style={{
               top: "100%", marginTop: 4, background: CARD, border: `1px solid ${LINE}`,
-              borderRadius: 14, boxShadow: "0 8px 30px rgba(16,17,20,.12)", width: 240,
+              borderRadius: 14, boxShadow: "0 8px 30px rgba(16,17,20,.12)", width: 230,
             }}
           >
-            <div className="text-left">
-              <div className="mb-1.5 text-sm2 font-semibold" style={{ color: INK }}>Category</div>
-              {/* Current location, chevron expands the full destination list */}
-              <button
-                type="button"
-                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs2"
-                style={pill}
-                aria-expanded={categoryPickerOpen}
-                aria-haspopup="listbox"
-                onClick={onToggleCategoryPicker}
-              >
-                {currentLabel}
-                <ChevronDown size={12} aria-hidden />
-              </button>
-              {categoryPickerOpen && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5" role="listbox" aria-label="Move to">
-                  {chipCats.map((c) =>
-                    chip(c.name, () =>
-                      // same-area category change keeps the rule-learning path;
-                      // cross-area lands as an expense in that category
-                      isExpense
-                        ? onTxnAction(t.id, "category", { categoryId: c.id })
-                        : onTxnAction(t.id, "move", { to: "expense", categoryId: c.id }),
-                    ),
-                  )}
-                  {area !== "income" && chip("Income", () => onTxnAction(t.id, "move", { to: "income" }))}
-                  {area !== "saved" && chip("Savings", () => onTxnAction(t.id, "move", { to: "saved" }))}
-                  {area !== "disputed" && chip("Disputed", () => onTxnAction(t.id, "move", { to: "disputed" }), BAD)}
-                </div>
-              )}
-            </div>
+            {renaming ? (
+              <input
+                type="text"
+                autoFocus
+                defaultValue={t.label}
+                maxLength={80}
+                aria-label="Rename transaction"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const v = (e.target as HTMLInputElement).value.trim();
+                    if (v) { onClose(); onRename(v); }
+                  }
+                  if (e.key === "Escape") setRenaming(false);
+                }}
+                className="w-full rounded-lg px-2 py-1.5 text-xs2 text-left"
+                style={{ border: `1px solid ${MUTED}`, color: INK, background: "#fff" }}
+              />
+            ) : (
+              /* stacked full-width rows with the Export menu's SOFT row
+                 hover — the app's one popover standard (Alena, 2026-07-29) */
+              <div className="text-left">
+                <button type="button" style={MENU_ITEM} {...menuItemHover} onClick={() => setRenaming(true)}>
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  style={MENU_ITEM}
+                  {...menuItemHover}
+                  aria-haspopup="dialog"
+                  onClick={() => { onClose(); onOpenPicker(); }}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Category</span>
+                    <span className="flex min-w-0 items-center gap-0.5" style={{ color: MUTED }}>
+                      <span className="truncate">{areaLabel(area, rowLabel)}</span>
+                      <ChevronRight size={13} aria-hidden className="shrink-0" />
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -248,19 +269,17 @@ function rowIcon(label: string, area: CashflowArea): LucideIcon {
 }
 
 function Row({
-  row, total, open, onToggle, valueColor, area, categories,
-  openTxnMenu, categoryPickerOpen, onToggleTxnMenu, onCloseTxnMenu, onToggleCategoryPicker, onTxnAction,
+  row, total, open, onToggle, valueColor, area,
+  openTxnMenu, onToggleTxnMenu, onCloseTxnMenu, onOpenPicker, onRenameTxn,
   onEdit,
 }: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
   area: CashflowArea;
-  categories: { id: number; name: string; grp: "need" | "want" }[];
   openTxnMenu: number | null;
-  categoryPickerOpen: boolean;
   onToggleTxnMenu: (id: number) => void;
   onCloseTxnMenu: () => void;
-  onToggleCategoryPicker: () => void;
-  onTxnAction: OnTxnAction;
+  onOpenPicker: (target: PickerTarget) => void;
+  onRenameTxn: (id: number, label: string) => void;
   /** edit mode: clicking the row opens the category modal instead of drilling */
   onEdit?: () => void;
 }) {
@@ -322,20 +341,21 @@ function Row({
         </button>
       </div>
       {drillable && open && (
-        <div className="mb-2 ml-3 border-l-2 pl-3" style={{ borderColor: LINE }}>
+        /* ml 22 + 2px border centers the guide line on the 38px avatar
+           (px-1 4 + 19); pl 26 + txn px-1 4 lands the date text at 54px —
+           the category label's left edge (Alena, 2026-07-29) */
+        <div className="mb-2 ml-[22px] border-l-2 pl-[26px]" style={{ borderColor: LINE }}>
           {row.txns.map((t) => (
             <TxnRow
               key={t.id}
               t={t}
               rowLabel={row.label}
               area={area}
-              categories={categories}
               isOpen={openTxnMenu === t.id}
-              categoryPickerOpen={categoryPickerOpen}
               onToggle={() => onToggleTxnMenu(t.id)}
               onClose={onCloseTxnMenu}
-              onToggleCategoryPicker={onToggleCategoryPicker}
-              onTxnAction={onTxnAction}
+              onOpenPicker={() => onOpenPicker({ id: t.id, area, rowLabel: row.label, txnLabel: t.label })}
+              onRename={(label) => onRenameTxn(t.id, label)}
             />
           ))}
           {area === "expense" && (
@@ -345,6 +365,87 @@ function Row({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Where a single transaction can be re-filed (spec Alena 2026-07-29): its
+// own modal, opened from the row popover's category pill. Destinations are
+// grouped under uppercase micro-labels — Income · Needs · Wants · Savings ·
+// Disputed — the current location's chip is omitted.
+export interface PickerTarget {
+  id: number;
+  area: CashflowArea;
+  rowLabel: string;
+  txnLabel: string;
+}
+
+function TxnPickerModal({
+  target, categories, onTxnAction, onClose,
+}: {
+  target: PickerTarget;
+  categories: { id: number; name: string; grp: "need" | "want" }[];
+  onTxnAction: OnTxnAction;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const isExpense = target.area === "expense";
+  const pickCategory = (c: { id: number; name: string }) => {
+    onClose();
+    // same-area category change keeps the rule-learning path; cross-area
+    // lands as an expense in that category
+    if (isExpense) onTxnAction(target.id, "category", { categoryId: c.id });
+    else onTxnAction(target.id, "move", { to: "expense", categoryId: c.id });
+  };
+  const pickArea = (to: CashflowArea) => {
+    onClose();
+    onTxnAction(target.id, "move", { to });
+  };
+  const cats = (grp: "need" | "want") =>
+    categories.filter((c) => c.grp === grp && !(isExpense && c.name === target.rowLabel));
+
+  const section = (label: string, chips: React.ReactNode) => (
+    <div className="mb-3">
+      <div className="text-label mb-1.5" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5">{chips}</div>
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center"
+      style={{ background: "rgba(16,17,20,.45)" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Move ${target.txnLabel}`}
+        className="w-[360px] rounded-2xl p-6"
+        style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
+      >
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <h2 className="min-w-0 truncate text-h2 font-bold" style={{ color: INK }}>{target.txnLabel}</h2>
+          <button type="button" aria-label="Close" style={{ color: MUTED, cursor: "pointer" }} onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="mb-4 text-xs2" style={{ color: MUTED }}>
+          Currently in <b style={{ color: INK }}>{areaLabel(target.area, target.rowLabel)}</b> — move to:
+        </div>
+        {target.area !== "income" && section("Income", destChip("Income", () => pickArea("income")))}
+        {cats("need").length > 0 && section("Needs", cats("need").map((c) => destChip(c.name, () => pickCategory(c))))}
+        {cats("want").length > 0 && section("Wants", cats("want").map((c) => destChip(c.name, () => pickCategory(c))))}
+        {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
+        {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
+      </div>
     </div>
   );
 }
@@ -513,9 +614,9 @@ export default function BudgetView({
   const [loading, setLoading] = useState(true);
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [openTxnMenu, setOpenTxnMenu] = useState<number | null>(null);
-  // Whether the currently-open txn popover has its category pick-list
-  // expanded — one popover open at a time, so one boolean is enough.
-  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  // Txn destination picker modal (spec Alena 2026-07-29) — set from a row
+  // popover's category pill; one at a time.
+  const [picker, setPicker] = useState<PickerTarget | null>(null);
   // >0 when the requested month has real settled transactions but isn't
   // synced yet (spec 2026-07-28's backfill gate) — the notFound render forks
   // on this to offer "Sync Month" instead of the generic empty state.
@@ -545,7 +646,7 @@ export default function BudgetView({
     setLoading(true);
     setOpenRow(null);
     setOpenTxnMenu(null);
-    setCategoryPickerOpen(false);
+    setPicker(null);
     setGatedTxnCount(0);
     setSyncError(null);
     setEditing(false);
@@ -613,7 +714,6 @@ export default function BudgetView({
   const onTxnAction = useCallback<OnTxnAction>(
     async (id, action, opts) => {
       setOpenTxnMenu(null);
-      setCategoryPickerOpen(false);
       const body =
         action === "category"
           ? { id, action, categoryId: opts?.categoryId }
@@ -685,19 +785,29 @@ export default function BudgetView({
     [onLocked, loadMonth],
   );
 
-  // One popover open at a time: toggling a different txn's ⋯ button (or
-  // closing the current one) always collapses any expanded category list.
+  // One popover open at a time.
   const onToggleTxnMenu = useCallback((id: number) => {
     setOpenTxnMenu((cur) => (cur === id ? null : id));
-    setCategoryPickerOpen(false);
   }, []);
   const onCloseTxnMenu = useCallback(() => {
     setOpenTxnMenu(null);
-    setCategoryPickerOpen(false);
   }, []);
-  const onToggleCategoryPicker = useCallback(() => {
-    setCategoryPickerOpen((v) => !v);
-  }, []);
+
+  // Rename a transaction's display label from its row popover.
+  const onRenameTxn = useCallback(
+    async (id: number, label: string) => {
+      setOpenTxnMenu(null);
+      const res = await fetch("/api/transactions", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "rename", label }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      if (res.ok) await loadMonth();
+    },
+    [onLocked, loadMonth],
+  );
 
   useEffect(() => {
     if (!plusOpen) return;
@@ -707,12 +817,6 @@ export default function BudgetView({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [plusOpen]);
-
-  const menuItem: React.CSSProperties = {
-    all: "unset" as unknown as undefined,
-    display: "block", width: "100%", boxSizing: "border-box",
-    padding: "9px 12px", borderRadius: 10, fontSize: 13, color: INK, cursor: "pointer",
-  };
 
   const header = (
     <div className="mb-5 flex items-center justify-between">
@@ -736,10 +840,8 @@ export default function BudgetView({
               }}
             >
               {!notFound && (
-                <button style={menuItem}
-                  onClick={() => { setPlusOpen(false); window.location.href = `/api/budget/export?month=${month}`; }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}>
+                <button style={MENU_ITEM} {...menuItemHover}
+                  onClick={() => { setPlusOpen(false); window.location.href = `/api/budget/export?month=${month}`; }}>
                   Export this month (.xlsx)
                 </button>
               )}
@@ -824,9 +926,8 @@ export default function BudgetView({
           <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD} area="income"
                open={openRow === `i:${row.label}`}
                onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)}
-               categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
-               onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
-               onTxnAction={onTxnAction} />
+               openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
         ))}
       </div>
 
@@ -854,9 +955,8 @@ export default function BudgetView({
                 <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
                      open={openRow === `e:${row.label}`}
                      onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                     categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
-                     onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
-                     onTxnAction={onTxnAction}
+                     openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
                      onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
               );
             })}
@@ -871,9 +971,8 @@ export default function BudgetView({
                 <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
                      open={openRow === `e:${row.label}`}
                      onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                     categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
-                     onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
-                     onTxnAction={onTxnAction}
+                     openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
                      onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
               );
             })}
@@ -886,9 +985,8 @@ export default function BudgetView({
             <Row row={data.disputed} total={data.totalExpenses} valueColor={MUTED} area="disputed"
                  open={openRow === "d:Disputed"}
                  onToggle={() => setOpenRow(openRow === "d:Disputed" ? null : "d:Disputed")}
-                 categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
-                 onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
-                 onTxnAction={onTxnAction} />
+                 openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
           </div>
         )}
       </div>
@@ -926,13 +1024,21 @@ export default function BudgetView({
           <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD} area="saved"
                open={openRow === `s:${row.label}`}
                onToggle={() => setOpenRow(openRow === `s:${row.label}` ? null : `s:${row.label}`)}
-               categories={data.categories} openTxnMenu={openTxnMenu} categoryPickerOpen={categoryPickerOpen}
-               onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu} onToggleCategoryPicker={onToggleCategoryPicker}
-               onTxnAction={onTxnAction}
+               openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
                onEdit={editingSavings ? () => setEditSaved(row) : undefined} />
         ))}
       </div>
 
+      {picker && (
+        <TxnPickerModal
+          key={picker.id}
+          target={picker}
+          categories={data.categories}
+          onTxnAction={onTxnAction}
+          onClose={() => setPicker(null)}
+        />
+      )}
       {editCat && (
         <CategoryModal
           key={editCat.id}

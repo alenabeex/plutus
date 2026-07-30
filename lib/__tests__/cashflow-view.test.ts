@@ -10,11 +10,18 @@ function makeDb(): Database.Database {
       sort INTEGER DEFAULT 0, grp TEXT
     );
     CREATE TABLE transactions (
-      id INTEGER PRIMARY KEY, date TEXT, name TEXT, merchant TEXT,
+      id INTEGER PRIMARY KEY, account_id INTEGER, date TEXT, name TEXT, merchant TEXT,
       amount REAL, category_id INTEGER, pending INTEGER DEFAULT 0,
       txn_class TEXT
     );
     CREATE TABLE budget_months (month TEXT PRIMARY KEY);
+    -- cashflowView LEFT JOINs accounts for the drill-down source-account
+    -- label (nickname/name + mask). Fixture rows never set account_id, so
+    -- every join resolves to NULL — matches none of the existing assertions,
+    -- this table just needs to exist so the query itself doesn't error.
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT
+    );
   `);
   const cat = d.prepare(`INSERT INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
   cat.run("Rent / Housing", 1, "need");
@@ -85,8 +92,8 @@ describe("cashflowView", () => {
     const v = cashflowView("2026-07", d);
     expect(v.income).toEqual([
       { label: "Acme Corp", value: 5200, txns: [
-        { id: 2, date: "2026-07-31", label: "Acme Corp", value: 2600 },
-        { id: 1, date: "2026-07-15", label: "Acme Corp", value: 2600 },
+        { id: 2, date: "2026-07-31", label: "Acme Corp", value: 2600, account: "" },
+        { id: 1, date: "2026-07-15", label: "Acme Corp", value: 2600, account: "" },
       ]},
     ]);
     expect(v.totalIncome).toBe(5200);

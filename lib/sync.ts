@@ -3,6 +3,7 @@ import { db, snapshotNetworth } from "./db";
 import { deriveAll } from "./derive";
 import { createMonth } from "./budget-ops";
 import { getPlaidClient, fetchBranding } from "./plaid";
+import { applyModifiedTxn, type ModifiedTxnFields } from "./apply-modified-txn";
 import type { PlaidApi } from "plaid";
 
 // Shared Plaid sync core — used by both app/api/plaid/sync/route.ts (HTTP)
@@ -13,6 +14,14 @@ import type { PlaidApi } from "plaid";
 export type SyncOutcome =
   | { configured: false }
   | { configured: true; synced: number; errors: string[] };
+
+// applyModifiedTxn's implementation lives in ./apply-modified-txn, kept
+// dependency-free (only the Database type) so it's testable without a
+// Plaid client — this file's own import chain (./plaid → @/lib/keychain)
+// uses a path alias vitest doesn't resolve. Re-exported here so it's still
+// discoverable from the sync module that's its only production caller.
+export { applyModifiedTxn };
+export type { ModifiedTxnFields };
 
 // Branding is fetched at link time, but the logo/institution_id columns were
 // added to `items` after the first connections existed — those rows have no
@@ -170,18 +179,17 @@ export async function runPlaidSync(dArg?: Database.Database, institution?: strin
           const row = getAccountByPlaidId
             .get(txn.account_id) as { id: number } | undefined;
           if (!row) continue;
-          // Update by removing and re-inserting (avoids full UPDATE column list).
-          removeTransaction.run(txn.transaction_id);
-          upsertTransaction.run(
-            row.id,
-            txn.transaction_id,
-            txn.date,
-            txn.name,
-            txn.merchant_name ?? txn.name,
-            txn.amount,
-            txn.pending ? 1 : 0,
-            txn.personal_finance_category?.detailed ?? txn.personal_finance_category?.primary ?? null,
-          );
+          // In place, never delete+reinsert — see applyModifiedTxn's own
+          // comment for why (data-loss bug, 2026-07-29).
+          applyModifiedTxn(d, row.id, {
+            plaidTxnId: txn.transaction_id,
+            date: txn.date,
+            name: txn.name,
+            merchant: txn.merchant_name ?? txn.name,
+            amount: txn.amount,
+            pending: !!txn.pending,
+            pfc: txn.personal_finance_category?.detailed ?? txn.personal_finance_category?.primary ?? null,
+          });
         }
 
         for (const rm of removed) {

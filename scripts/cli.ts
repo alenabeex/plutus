@@ -13,6 +13,8 @@
  *   sync                     Run Plaid balance/transaction sync (no-op, exit 0, if not configured).
  *   month-close [YYYY-MM]    Close a budget month (default: latest open month). Requires --confirm.
  *   month-new                Roll over to the next month (copy fixed items, zero income/variable).
+ *   categorize               Run the derivation pass (classify + rules) without a Plaid sync.
+ *   categorize-ai            AI-name uncategorized merchants → new category rules (needs API key; no-op without).
  *   help                     Print this usage text.
  *
  * Exit codes: 0 success, 1 refusal/error.
@@ -32,6 +34,12 @@ import { runPlaidSync } from "../lib/sync.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — relative import, tsx resolves it
 import { createNewMonth, BudgetOpsError } from "../lib/budget-ops.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — relative import, tsx resolves it
+import { deriveAll } from "../lib/derive.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — relative import, tsx resolves it
+import { aiCategorize } from "../lib/ai-categorize.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +74,12 @@ Commands:
                             Destructive — requires --confirm, else prints what it would do and exits 1.
   month-new                Roll over to the next month: copies fixed items from the latest month,
                             zeroes income/variable.
+  categorize               Run the derivation pass (classify income/expense/transfer, apply
+                            category rules, materialize months, detect recurring) without a sync.
+  categorize-ai            Send UNCATEGORIZED MERCHANT NAMES (nothing else — no amounts/dates)
+                            to the Anthropic API; each answer becomes a category_rules row.
+                            Needs ANTHROPIC_API_KEY or Keychain finance-anthropic-key; exits 0
+                            as a no-op without one.
   help                     Print this usage text.
 
 Exit codes: 0 success, 1 refusal/error.
@@ -197,6 +211,34 @@ function cmdMonthNew(): void {
   }
 }
 
+function cmdCategorize(): void {
+  const result = deriveAll();
+  console.log(
+    `Derivation pass: ${result.classified} classified, ${result.categorized} categorized, ${result.detected} recurring detected.`,
+  );
+  process.exit(0);
+}
+
+async function cmdCategorizeAi(): Promise<void> {
+  const result = await aiCategorize();
+  if (result.skipped === "no-key") {
+    console.log("no API key (ANTHROPIC_API_KEY or Keychain finance-anthropic-key) — skipped");
+    process.exit(0);
+  }
+  if (result.skipped === "nothing-to-do") {
+    console.log("no uncategorized merchants — nothing to do");
+    process.exit(0);
+  }
+  if (result.skipped === "refusal") {
+    console.error("model declined the request — no rules written");
+    process.exit(1);
+  }
+  console.log(
+    `Sent ${result.merchantsSent} merchant name(s); ${result.rulesAdded} new rule(s); ${result.categorized} transaction(s) categorized.`,
+  );
+  process.exit(0);
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -214,6 +256,12 @@ async function main(): Promise<void> {
       break;
     case "month-new":
       cmdMonthNew();
+      break;
+    case "categorize":
+      cmdCategorize();
+      break;
+    case "categorize-ai":
+      await cmdCategorizeAi();
       break;
     case "help":
     case undefined:
