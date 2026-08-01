@@ -125,6 +125,14 @@ pnpm build && pnpm start
 
 **Not on a Mac?** The current release depends on the macOS Keychain for secrets. Cross-platform `.env` secrets and a Docker image are the next milestone (see Roadmap) — until then Plutus is macOS-only.
 
+## Security
+
+There is no Plutus server, no account to create, and no telemetry. The app binds `127.0.0.1` and rejects any non-localhost request; the database is SQLCipher-encrypted at `~/FinanceTracker/finance.db` with its key in your Keychain, never on disk; your Plaid keys stay on your machine and your bank credentials go only into Plaid's own window. The single optional outbound call beyond Plaid is AI categorization, which is sent merchant name strings and nothing else — no amounts, dates, or balances.
+
+Full detail — data-flow table, auth design, CSRF and CSP specifics, and known limitations — is in [SECURITY.md](SECURITY.md).
+
+One dependency note: `xlsx` (SheetJS) installs from the vendor's CDN tarball rather than npm, which is the channel SheetJS directs users to. It is used only by `scripts/import-sheet.ts`.
+
 ## Roadmap
 
 - Portability: `.env` secrets fallback, Linux/Windows, Dockerfile + compose
@@ -140,3 +148,7 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE). Free to use, modify, and redistribute, forever.

@@ -20,8 +20,18 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 
 (none)
 
+### 2026-08-01 (later)
+
+- `[FILE]` **LICENSE added — MIT**, copyright "Ai Ling (Alena) You". Chosen over AGPL: framing is permanently-free portfolio project with no monetization path to protect, and MIT matches the borjasolerme coding-workflow skill the repo's practice section already binds to. Unblocks public use — the repo had been public with no license, which legally permits nobody to use, fork, or redistribute it.
+- `[FILE]` **SECURITY.md written** — data-flow page for the audience-A (self-hoster/dev) launch. Covers: where each artifact lives (DB / db key / Plaid creds / PIN hash / access tokens) and what protects it; the complete list of outbound destinations (Plaid, plus optional Anthropic receiving merchant name strings only); localhost bind + 403 backstop; CSP and security headers; PIN/scrypt/timingSafeEqual/HKDF session design and the Keychain-persisted brute-force counter; CSRF origin rule incl. missing-Origin rejection; generic-500 error wrapping; gitleaks + the `xlsx` CDN-tarball provenance note; demo-mode namespace isolation; known limitations (macOS-only, FileVault dependency, no third-party audit). Every claim traced to the source file it lives in before writing — no unverified assertions.
+- `[FILE]` README: added `## Security` section (one-paragraph summary + SECURITY.md link + `xlsx` provenance note) and `## License` section. Typecheck clean, 12/12 tests pass after.
+- `[OPS]` **Repo-history audit before launch** (locked rule: never publish history containing pre-scrub real numbers). Result: **history is clean.** Root commit `9f97b91` is a bare Next.js scaffold (24 files, no data); zero `.db`/`.env`/`seed.local.json`/`.csv`/`.xlsx` blobs in any commit; zero currency amounts in any commit message; `lib/seed-config.ts` has zero 4+ digit numbers across all four of its versions and declares itself fake in its header. Real seed stays at `~/FinanceTracker/seed.local.json`, gitignored, never tracked. The repo was already re-rooted with fresh history — the rule was satisfied before this session.
+- `[OPS]` **Two discrepancies for Alena to resolve.** (1) `github.com/alenabeex/plutus` reports `visibility: PUBLIC`, but the 08-01 and 07-27 `[GIT]` entries above both record it as private — the log and GitHub disagree; confirm which is intended. (2) `activity.md:54` describes a tile value with the phrasing "with her numbers", which reads like real figures rather than demo — per AGENTS.md §3 it needs review and likely a scrub. Values deliberately not reproduced here.
+- `[OPS]` Uncommitted `middleware.ts` diff reviewed: renames the default export `proxy` → `middleware`. Cosmetic — Next.js dispatches on the default export, not its name, so the local-access guard was already live in the committed build. No security gap in what is published.
+
 ### 2026-08-01
 
+- `[GIT]` Pushed `ad5e472..d31965d` to `github.com/alenabeex/plutus` (private), 2 commits: `820e6d1` middleware rename (the 07-31 local-access-guard fix, found staged but uncommitted — committed as its own commit) and `d31965d` README hero swap + activity log. Code and docs only — no financial data, no secrets; gitleaks clean on both.
 - `[FILE]` README hero swapped to Net Worth (Alena's ask "use screenshot-networth.png for the main page"): hero now `docs/screenshot-networth.png`, and the "More screens" gallery's Net Worth column replaced with Cash Flow (`docs/screenshot-cashflow.png`) so all four tabs stay visible. Matches the locked IA framing — Net Worth is the design-template reference view. `docs/screenshot.png` left on disk, no longer referenced.
 
 ### 2026-07-31
