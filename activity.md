@@ -18,17 +18,15 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 
 ## Open security items
 
-- **Local-access guard is claimed but not implemented.** `app/page.tsx:254`
-  shows the user "Blocked by the local access guard — open the app on
-  localhost" on any non-JSON 403, but no such guard exists server-side: there
-  is no `middleware.ts`, and no host/IP check in `lib/auth.ts` or any route.
-  Nothing restricts requests by origin host. Today the only thing keeping the
-  real instance off the internet is the port convention (tunnels point at 3000
-  = demo; real runs on 8420) plus the PIN gate — not a guard. Fix: add a
-  middleware that rejects requests whose host is not localhost/127.0.0.1/::1
-  unless an explicit opt-in env (the planned `--lan` flag) is set, and return
-  a JSON 403 so the existing client message is accurate. Raised 2026-07-27
-  after an orphaned quick-tunnel was found pointed at port 3000.
+(none)
+
+### 2026-08-01
+
+- `[FILE]` README hero swapped to Net Worth (Alena's ask "use screenshot-networth.png for the main page"): hero now `docs/screenshot-networth.png`, and the "More screens" gallery's Net Worth column replaced with Cash Flow (`docs/screenshot-cashflow.png`) so all four tabs stay visible. Matches the locked IA framing — Net Worth is the design-template reference view. `docs/screenshot.png` left on disk, no longer referenced.
+
+### 2026-07-31
+
+- `[CONFIG]` **Local-access guard enabled (security fix).** `proxy.ts` → `middleware.ts` + renamed default export to match. The host/origin check code has existed since v1 (guard blocks non-localhost requests, CSRF check blocks cross-origin mutations, CSP/headers hardened), but it was not active because Next.js requires middleware to be named `middleware.ts` not `proxy.ts`. Guard now enforces: requests to non-localhost hosts get 403 "Forbidden — local access only" unless `FT_DEMO=1` + `FT_TUNNEL_HOST` env is set (demo tunnel allowlist). Mutating requests also validate Origin: must match localhost or tunnel host, MISSING Origins rejected. Fixes the gap reported 2026-07-27 where activity.md documented the guard as unimplemented. Typecheck clean.
 
 ### 2026-07-30
 

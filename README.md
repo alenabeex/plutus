@@ -1,6 +1,6 @@
 # Plutus
 
-![Plutus — Cash Flow view with demo data](docs/screenshot.png)
+![Plutus — Net Worth view with demo data](docs/screenshot-networth.png)
 
 Plutus is a free, open-source, self-hosted net worth and cash flow tracker. It runs entirely on your own machine with your own Plaid keys — your financial data never leaves it, and nobody hosts anything for you.
 
@@ -9,11 +9,11 @@ Four tabs: **Net Worth · Cash Flow · Subscriptions · Connections**. Cash Flow
 It has a Next.js frontend and API in one process, an encrypted SQLite database (SQLCipher), and Plaid for read-only bank sync.
 
 <details>
-<summary>More screens (Net Worth · Subscriptions · Connections)</summary>
+<summary>More screens (Cash Flow · Subscriptions · Connections)</summary>
 
-| Net Worth | Subscriptions | Connections |
+| Cash Flow | Subscriptions | Connections |
 |---|---|---|
-| ![Net Worth — total balance, allocation, assets and liabilities](docs/screenshot-networth.png) | ![Subscriptions — recurring charges on a month calendar](docs/screenshot-subscriptions.png) | ![Connections — linked institutions and manual assets](docs/screenshot-connections.png) |
+| ![Cash Flow — income, needs, wants, savings with demo data](docs/screenshot-cashflow.png) | ![Subscriptions — recurring charges on a month calendar](docs/screenshot-subscriptions.png) | ![Connections — linked institutions and manual assets](docs/screenshot-connections.png) |
 
 </details>
 
