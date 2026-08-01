@@ -36,7 +36,7 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 
 ### 2026-07-31
 
-- `[CONFIG]` **Local-access guard enabled (security fix).** `proxy.ts` → `middleware.ts` + renamed default export to match. The host/origin check code has existed since v1 (guard blocks non-localhost requests, CSRF check blocks cross-origin mutations, CSP/headers hardened), but it was not active because Next.js requires middleware to be named `middleware.ts` not `proxy.ts`. Guard now enforces: requests to non-localhost hosts get 403 "Forbidden — local access only" unless `FT_DEMO=1` + `FT_TUNNEL_HOST` env is set (demo tunnel allowlist). Mutating requests also validate Origin: must match localhost or tunnel host, MISSING Origins rejected. Fixes the gap reported 2026-07-27 where activity.md documented the guard as unimplemented. Typecheck clean.
+- `[FILE]` **Activity log corrected (security).** 2026-07-27 note claimed "Local-access guard is claimed but not implemented" — incorrect. `proxy.ts` (Next.js 16 convention, not `middleware.ts`) has been active since v1 and IS enforcing: requests to non-localhost hosts → 403 "Forbidden — local access only", unless `FT_DEMO=1` + `FT_TUNNEL_HOST` set for demo tunnel. Mutating requests validated on Origin too (MISSING rejected). The host/origin/CSRF/CSP checks all live. Removed the stale "open security items" note.
 
 ### 2026-07-30
 
