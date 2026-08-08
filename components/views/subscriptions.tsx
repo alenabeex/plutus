@@ -29,7 +29,7 @@ function CalendarGrid({ data, animKey }: CalendarGridProps) {
     cells.push(
       <div
         key={`blank-${i}`}
-        className="text-label p-2"
+        className="text-[11px] p-2"
         style={{
           minHeight: 80,
           borderRight: `1px solid ${SOFT}`,
@@ -51,7 +51,7 @@ function CalendarGrid({ data, animKey }: CalendarGridProps) {
     cells.push(
       <div
         key={`day-${day}-${animKey}`}
-        className="text-label p-2"
+        className="text-[11px] p-2"
         style={{
           minHeight: 80,
           borderRight: isLastCol ? "none" : `1px solid ${SOFT}`,
@@ -63,7 +63,7 @@ function CalendarGrid({ data, animKey }: CalendarGridProps) {
         {events.map((e, i) => (
           <span
             key={i}
-            className="num text-label mt-1 px-2 py-1"
+            className="num text-[11px] mt-1 px-2 py-1"
             style={{
               border: `1px ${e.bill ? "dashed" : "solid"} ${LINE}`,
               borderRadius: 7,
@@ -108,7 +108,7 @@ function CalendarGrid({ data, animKey }: CalendarGridProps) {
         {DOWS.map((dow) => (
           <div
             key={dow}
-            className="text-label p-2"
+            className="text-[11px] p-2"
             style={{
               textTransform: "uppercase",
               letterSpacing: "0.06em",
@@ -147,7 +147,7 @@ function LineRow({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-2 py-2 text-sm2"
+      className="flex items-center justify-between gap-2 py-2 text-[13px]"
       style={{
         borderBottom: bold || last ? "none" : `1px solid ${SOFT}`,
         borderTop: bold ? `1px solid ${LINE}` : undefined,
@@ -164,7 +164,7 @@ function ThisMonthCard({ tm }: { tm: SubscriptionsData["thisMonth"] }) {
     <Card
       className={CARD_SHELL}
     >
-      <h2 className="text-num-md font-bold mb-3" style={{ fontWeight: 700, color: INK }}>
+      <h2 className="text-lg font-bold mb-3" style={{ fontWeight: 700, color: INK }}>
         This Month
       </h2>
       <LineRow label="Subscriptions" value={usd(tm.subs)} valueColor={BAD} />
@@ -178,13 +178,13 @@ function AnnualFeesCard({ fees }: { fees: SubscriptionsData["annualFees"] }) {
     <Card
       className={CARD_SHELL}
     >
-      <h2 className="text-num-md font-bold mb-3" style={{ fontWeight: 700, color: INK }}>
+      <h2 className="text-lg font-bold mb-3" style={{ fontWeight: 700, color: INK }}>
         Annual Fees
       </h2>
       {fees.map((f) => (
         <div
           key={f.label}
-          className="flex items-center justify-between gap-2 py-2 text-sm2"
+          className="flex items-center justify-between gap-2 py-2 text-[13px]"
           style={{
             borderBottom: `1px solid ${SOFT}`,
           }}
@@ -243,7 +243,7 @@ export default function SubscriptionsView({ month, onMonthChange, dataMonths, mo
       {/* .vhead */}
       <div className="flex items-center gap-3 mb-4">
         <h1
-          className="text-h1 font-extrabold"
+          className="text-xl font-extrabold"
           style={{ letterSpacing: "-0.01em", color: INK }}
         >
           Subscriptions
@@ -251,7 +251,7 @@ export default function SubscriptionsView({ month, onMonthChange, dataMonths, mo
 
         {/* future month = projection, not history — say so */}
         {month > new Date().toISOString().slice(0, 7) && (
-          <span className="text-xs2" style={{ color: MUTED }}>projected</span>
+          <span className="text-xs" style={{ color: MUTED }}>projected</span>
         )}
 
         {/* global month picker — shared with Cash Flow */}

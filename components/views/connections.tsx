@@ -80,7 +80,7 @@ function ConfirmRemoveDialog({
       onClick={onCancel}
     >
       <div className={CARD} style={{ width: 320 }} onClick={(e) => e.stopPropagation()}>
-        <p className="text-num-md" style={{ fontWeight: 700, color: INK }}>
+        <p className="text-lg" style={{ fontWeight: 700, color: INK }}>
           Remove {label}?
         </p>
         <div className="flex items-center justify-end gap-2 mt-4">
@@ -176,12 +176,12 @@ function ManualAssetDialog({ asset, onSaved, onCancel, onLocked }: ManualAssetDi
       aria-label={editing ? `Edit ${asset!.label}` : "Add manual asset"}
     >
       <div className={CARD} style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
-        <p className="text-num-md mb-4" style={{ fontWeight: 700, color: INK }}>
+        <p className="text-lg mb-4" style={{ fontWeight: 700, color: INK }}>
           {editing ? "Edit asset" : "Add manual asset"}
         </p>
 
         {/* icon picker — the row's avatar, chosen up front */}
-        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Icon</p>
+        <p className="text-xs mb-2" style={{ color: MUTED, fontWeight: 600 }}>Icon</p>
         <div className="flex flex-wrap gap-2 mb-4">
           {ASSET_ICON_KEYS.map((k) => (
             <button
@@ -199,7 +199,7 @@ function ManualAssetDialog({ asset, onSaved, onCancel, onLocked }: ManualAssetDi
         </div>
 
         {/* name */}
-        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Name</p>
+        <p className="text-xs mb-2" style={{ color: MUTED, fontWeight: 600 }}>Name</p>
         <input
           ref={labelRef}
           type="text"
@@ -207,19 +207,19 @@ function ManualAssetDialog({ asset, onSaved, onCancel, onLocked }: ManualAssetDi
           onChange={(e) => setLabel(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") save(); }}
           placeholder="Bitcoin"
-          className="py-2 px-3 text-sm2 mb-4"
+          className="py-2 px-3 text-[13px] mb-4"
           style={fieldStyle}
         />
 
         {/* value */}
-        <p className="text-xs2 mb-2" style={{ color: MUTED, fontWeight: 600 }}>Value</p>
+        <p className="text-xs mb-2" style={{ color: MUTED, fontWeight: 600 }}>Value</p>
         <input
           type="number"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") save(); }}
           placeholder="0"
-          className="py-2 px-3 text-sm2 num"
+          className="py-2 px-3 text-[13px] num"
           style={{ ...fieldStyle, fontVariantNumeric: "tabular-nums" }}
         />
 
@@ -295,10 +295,10 @@ function ManualAssetRow({ id, label, value, icon, isLast, onSaved, onLocked }: M
       <AssetIcon icon={icon} />
       {/* .who — title, then its category */}
       <span className="min-w-0">
-        <b className="text-body" style={{ display: "block", fontWeight: 600, color: INK }}>
+        <b className="text-sm" style={{ display: "block", fontWeight: 600, color: INK }}>
           {label}
         </b>
-        <span className="text-xs2" style={{ color: MUTED }}>{ASSET_ICON_LABELS[icon]}</span>
+        <span className="text-xs" style={{ color: MUTED }}>{ASSET_ICON_LABELS[icon]}</span>
       </span>
       <span className="relative flex items-center gap-2 ml-auto">
         <b className="num" style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600, color: GOOD }}>
@@ -527,7 +527,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
       {/* .vhead */}
       <div className="flex items-center gap-3 mb-4">
         <h1
-          className="text-h1 font-extrabold"
+          className="text-xl font-extrabold"
           style={{ letterSpacing: "-0.01em", color: INK }}
         >
           Connections
@@ -540,7 +540,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
         <Card className={CARD}>
           {/* header: title left, + Link account top-right */}
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-num-md" style={{ fontWeight: 700, color: INK }}>
+            <h2 className="text-lg" style={{ fontWeight: 700, color: INK }}>
               Linked Institutions
             </h2>
             <button
@@ -589,7 +589,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                   />
                 ) : (
                   <span
-                    className="flex items-center justify-center shrink-0 num text-label"
+                    className="flex items-center justify-center shrink-0 num text-[11px]"
                     aria-hidden
                     style={{
                       width: 38,
@@ -605,10 +605,10 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                 )}
                 {/* .who */}
                 <span className="min-w-0">
-                  <b className="text-body" style={{ display: "block", fontWeight: 600, color: INK }}>
+                  <b className="text-sm" style={{ display: "block", fontWeight: 600, color: INK }}>
                     {inst.name}
                   </b>
-                  <span className="text-xs2" style={{ color: MUTED }}>{inst.sub}</span>
+                  <span className="text-xs" style={{ color: MUTED }}>{inst.sub}</span>
                 </span>
                 {/* right side: dot + last-sync/Re-link + ⋯ — remove confirms in a dialog, never inline */}
                 {confirmDelete === inst.name && (
@@ -623,14 +623,14 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
                     {/* why the dot isn't green — visible, not hover-only */}
                     {inst.health !== "good" && (
                       <span
-                        className="text-xs2 truncate"
+                        className="text-xs truncate"
                         style={{ color: inst.health === "stale" ? WARN : BAD, maxWidth: 220 }}
                       >
                         {inst.healthReason}
                       </span>
                     )}
                     {/* last-synced date, then the health dot after it */}
-                    <span className="num text-xs2" style={{ color: MUTED }}>
+                    <span className="num text-xs" style={{ color: MUTED }}>
                       {inst.last}
                     </span>
                     {/* .dot — green fresh · amber stale/never · red re-auth */}
@@ -731,7 +731,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
         <Card className={CARD}>
             {/* header: title left, + Add manual asset top-right — same as Linked Institutions */}
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-num-md" style={{ fontWeight: 700, color: INK }}>
+              <h2 className="text-lg" style={{ fontWeight: 700, color: INK }}>
                 Manual Assets
               </h2>
               <button
@@ -770,7 +770,7 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
 
             {/* empty state — the card can't be a blank box under its header */}
             {data.manualAssets.length === 0 && (
-              <p className="text-xs2 py-2" style={{ color: MUTED }}>
+              <p className="text-xs py-2" style={{ color: MUTED }}>
                 Nothing here yet — add anything Plaid can&apos;t see: crypto, a car, property.
               </p>
             )}
@@ -787,10 +787,10 @@ export default function ConnectionsView({ onLocked }: { onLocked: () => void }) 
 
           {/* Security card */}
           <Card className={CARD}>
-            <h2 className="text-num-md mb-3" style={{ fontWeight: 700, color: INK }}>
+            <h2 className="text-lg mb-3" style={{ fontWeight: 700, color: INK }}>
               Security
             </h2>
-            <div className="text-xs2 gap-2" style={{ display: "flex", flexDirection: "column" }}>
+            <div className="text-xs gap-2" style={{ display: "flex", flexDirection: "column" }}>
               {data.security.map((s, i) => (
                 <span
                   key={i}

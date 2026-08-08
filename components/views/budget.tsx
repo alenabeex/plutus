@@ -62,9 +62,9 @@ function Tile({ label, value, bg, color, sub, subColor }: {
       className="flex-1 rounded-2xl p-4"
       style={{ background: bg ?? CARD, border: `1px solid ${LINE}` }}
     >
-      <div className="text-xs2 mb-1" style={{ color: MUTED }}>{label}</div>
-      <div className="num text-num-lg font-extrabold" style={{ color: color ?? INK }}>{value}</div>
-      {sub && <div className="text-xs2 mt-0.5" style={{ color: subColor ?? MUTED }}>{sub}</div>}
+      <div className="text-xs mb-1" style={{ color: MUTED }}>{label}</div>
+      <div className="num text-2xl font-extrabold" style={{ color: color ?? INK }}>{value}</div>
+      {sub && <div className="text-xs mt-0.5" style={{ color: subColor ?? MUTED }}>{sub}</div>}
     </div>
   );
 }
@@ -91,7 +91,7 @@ function destChip(label: string, onClick: () => void, color?: string) {
     <button
       key={label}
       type="button"
-      className="rounded-full px-2.5 py-1 text-xs2"
+      className="rounded-full px-2.5 py-1 text-xs"
       style={{ border: `1px solid ${LINE}`, color: color ?? MUTED, cursor: "pointer" }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
       onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
@@ -154,7 +154,7 @@ function TxnRow({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg px-1 py-1 text-xs2"
+      className="flex items-center gap-3 rounded-lg px-1 py-1 text-xs"
       style={{ color: MUTED }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
       onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
@@ -198,7 +198,7 @@ function TxnRow({
                   }
                   if (e.key === "Escape") setRenaming(false);
                 }}
-                className="w-full rounded-lg px-2 py-1.5 text-xs2 text-left"
+                className="w-full rounded-lg px-2 py-1.5 text-xs text-left"
                 style={{ border: `1px solid ${MUTED}`, color: INK, background: "#fff" }}
               />
             ) : (
@@ -317,7 +317,7 @@ function Row({
             {icon}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex justify-between text-sm2" style={{ color: INK }}>
+            <div className="flex justify-between text-[13px]" style={{ color: INK }}>
               <span className="truncate">{row.label}</span>
               <span className="num font-semibold" style={{ color: valueColor }}>{usd(row.value)}</span>
             </div>
@@ -327,7 +327,7 @@ function Row({
               </div>
             )}
           </div>
-          {!noBar && <span className="num w-9 text-right text-xs2" style={{ color: MUTED }}>{share}%</span>}
+          {!noBar && <span className="num w-9 text-right text-xs" style={{ color: MUTED }}>{share}%</span>}
           {noBar && <span className="w-9" aria-hidden />}
           {onEdit ? (
             <Pencil size={14} style={{ color: MUTED }} aria-hidden />
@@ -359,7 +359,7 @@ function Row({
             />
           ))}
           {area === "expense" && (
-            <div className="py-1 text-xs2" style={{ color: MUTED }}>
+            <div className="py-1 text-xs" style={{ color: MUTED }}>
               Wrong category? Fix it on the transaction.
             </div>
           )}
@@ -411,7 +411,7 @@ function TxnPickerModal({
 
   const section = (label: string, chips: React.ReactNode) => (
     <div className="mb-3">
-      <div className="text-label mb-1.5" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>
+      <div className="text-[11px] mb-1.5" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>
         {label}
       </div>
       <div className="flex flex-wrap gap-1.5">{chips}</div>
@@ -432,12 +432,12 @@ function TxnPickerModal({
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between gap-3">
-          <h2 className="min-w-0 truncate text-h2 font-bold" style={{ color: INK }}>{target.txnLabel}</h2>
+          <h2 className="min-w-0 truncate text-[15px] font-bold" style={{ color: INK }}>{target.txnLabel}</h2>
           <button type="button" aria-label="Close" style={{ color: MUTED, cursor: "pointer" }} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
-        <div className="mb-4 text-xs2" style={{ color: MUTED }}>
+        <div className="mb-4 text-xs" style={{ color: MUTED }}>
           Currently in <b style={{ color: INK }}>{areaLabel(target.area, target.rowLabel)}</b> — move to:
         </div>
         {target.area !== "income" && section("Income", destChip("Income", () => pickArea("income")))}
@@ -488,7 +488,7 @@ function CategoryModal({
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-h2 font-bold" style={{ color: INK }}>Edit category</h2>
+          <h2 className="text-[15px] font-bold" style={{ color: INK }}>Edit category</h2>
           <button
             type="button"
             aria-label="Close"
@@ -504,13 +504,13 @@ function CategoryModal({
           aria-label="Category name"
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && dirty && !busy) onRename(name.trim()); }}
-          className="w-full rounded-lg px-3 py-2 text-body"
+          className="w-full rounded-lg px-3 py-2 text-sm"
           style={{ border: `1px solid ${LINE}`, color: INK }}
         />
-        {error && <div className="mt-2 text-xs2" style={{ color: BAD }}>{error}</div>}
+        {error && <div className="mt-2 text-xs" style={{ color: BAD }}>{error}</div>}
         <button
           type="button"
-          className="mt-4 w-full rounded-full py-2.5 text-sm2 font-semibold"
+          className="mt-4 w-full rounded-full py-2.5 text-[13px] font-semibold"
           style={{
             background: INK, color: "#fff",
             cursor: dirty && !busy ? "pointer" : "default",
@@ -523,7 +523,7 @@ function CategoryModal({
         </button>
         <button
           type="button"
-          className="mt-2 w-full rounded-full py-2.5 text-sm2 font-semibold"
+          className="mt-2 w-full rounded-full py-2.5 text-[13px] font-semibold"
           style={{
             border: `1px solid ${deleteArmed ? BAD : LINE}`,
             background: deleteArmed ? "#fdf3f2" : "transparent",
@@ -577,7 +577,7 @@ function SavedRowModal({
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-h2 font-bold" style={{ color: INK }}>{row.label}</h2>
+          <h2 className="text-[15px] font-bold" style={{ color: INK }}>{row.label}</h2>
           <button
             type="button"
             aria-label="Close"
@@ -585,22 +585,22 @@ function SavedRowModal({
             onClick={onClose}
           ><X size={16} /></button>
         </div>
-        <div className="mb-4 text-xs2" style={{ color: MUTED }}>
+        <div className="mb-4 text-xs" style={{ color: MUTED }}>
           {row.txns.length} transaction{row.txns.length === 1 ? "" : "s"} · {usd(row.value)} —
           move all of them to:
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <button type="button" className="rounded-full px-2.5 py-1 text-xs2" style={chipStyle}
+          <button type="button" className="rounded-full px-2.5 py-1 text-xs" style={chipStyle}
             disabled={busy} onClick={() => onMoveAll("income")}>Income</button>
           {categories.map((c) => (
-            <button key={c.id} type="button" className="rounded-full px-2.5 py-1 text-xs2" style={chipStyle}
+            <button key={c.id} type="button" className="rounded-full px-2.5 py-1 text-xs" style={chipStyle}
               disabled={busy} onClick={() => onMoveAll("expense", c.id)}>{c.name}</button>
           ))}
-          <button type="button" className="rounded-full px-2.5 py-1 text-xs2"
+          <button type="button" className="rounded-full px-2.5 py-1 text-xs"
             style={{ ...chipStyle, color: BAD }}
             disabled={busy} onClick={() => onMoveAll("disputed")}>Disputed</button>
         </div>
-        {busy && <div className="mt-3 text-xs2" style={{ color: MUTED }}>Moving…</div>}
+        {busy && <div className="mt-3 text-xs" style={{ color: MUTED }}>Moving…</div>}
       </div>
     </div>
   );
@@ -820,7 +820,7 @@ export default function BudgetView({
 
   const header = (
     <div className="mb-5 flex items-center justify-between">
-      <h1 className="text-h1 font-extrabold" style={{ color: INK }}>Cash Flow</h1>
+      <h1 className="text-xl font-extrabold" style={{ color: INK }}>Cash Flow</h1>
       <MonthPicker month={month} onChange={onMonthChange} dataMonths={dataMonths} min={monthMin} max={monthMax}>
         <div ref={plusRef} className="relative">
           <button
@@ -853,7 +853,7 @@ export default function BudgetView({
   );
 
   if (loading) {
-    return <div>{header}<div className="p-10 text-body" style={{ color: MUTED }}>Loading…</div></div>;
+    return <div>{header}<div className="p-10 text-sm" style={{ color: MUTED }}>Loading…</div></div>;
   }
 
   if (notFound || !data) {
@@ -862,21 +862,21 @@ export default function BudgetView({
         <div>
           {header}
           <div className="rounded-2xl p-10 text-center" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-            <div className="text-body" style={{ color: INK }}>This month has history waiting.</div>
-            <div className="mx-auto mt-2 max-w-md text-body" style={{ color: MUTED }}>
+            <div className="text-sm" style={{ color: INK }}>This month has history waiting.</div>
+            <div className="mx-auto mt-2 max-w-md text-sm" style={{ color: MUTED }}>
               {gatedTxnCount} transactions from your linked accounts are ready. Sync this month to
               build it — unsynced months never count against you.
             </div>
             <button
               type="button"
-              className="mt-4 rounded-full px-5 py-2.5 text-sm2 font-semibold"
+              className="mt-4 rounded-full px-5 py-2.5 text-[13px] font-semibold"
               style={{ background: INK, color: "#fff", cursor: syncing ? "default" : "pointer", opacity: syncing ? 0.6 : 1 }}
               disabled={syncing}
               onClick={onSyncMonth}
             >
               {syncing ? "Syncing…" : "Sync Month"}
             </button>
-            {syncError && <div className="mt-2 text-xs2" style={{ color: MUTED }}>{syncError}</div>}
+            {syncError && <div className="mt-2 text-xs" style={{ color: MUTED }}>{syncError}</div>}
           </div>
         </div>
       );
@@ -885,8 +885,8 @@ export default function BudgetView({
       <div>
         {header}
         <div className="rounded-2xl p-10 text-center" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-          <div className="text-body" style={{ color: INK }}>Nothing here yet.</div>
-          <div className="mx-auto mt-2 max-w-md text-body" style={{ color: MUTED }}>
+          <div className="text-sm" style={{ color: INK }}>Nothing here yet.</div>
+          <div className="mx-auto mt-2 max-w-md text-sm" style={{ color: MUTED }}>
             Cash Flow builds itself from your transactions — there&apos;s nothing to set up.
             Link an account under Connections and this month fills in on the next sync.
           </div>
@@ -918,9 +918,9 @@ export default function BudgetView({
       </div>
 
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h2 className="text-num-md font-bold mb-3" style={{ color: INK }}>Income</h2>
+        <h2 className="text-lg font-bold mb-3" style={{ color: INK }}>Income</h2>
         {data.income.length === 0 && (
-          <div className="py-3 text-body" style={{ color: MUTED }}>No income this month.</div>
+          <div className="py-3 text-sm" style={{ color: MUTED }}>No income this month.</div>
         )}
         {data.income.map((row) => (
           <Row key={row.label} row={row} total={data.totalIncome} valueColor={GOOD} area="income"
@@ -933,7 +933,7 @@ export default function BudgetView({
 
       <div className="rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-num-md font-bold" style={{ color: INK }}>Expenses</h2>
+          <h2 className="text-lg font-bold" style={{ color: INK }}>Expenses</h2>
           <button
             type="button"
             style={EDIT_BTN}
@@ -944,11 +944,11 @@ export default function BudgetView({
           </button>
         </div>
         {data.expenses.length === 0 && (
-          <div className="py-3 text-body" style={{ color: MUTED }}>No expenses this month.</div>
+          <div className="py-3 text-sm" style={{ color: MUTED }}>No expenses this month.</div>
         )}
         {needsRows.length > 0 && (
           <>
-            <div className="text-label mt-0 mb-1" style={{ color: MUTED }}>NEEDS</div>
+            <div className="text-[11px] mt-0 mb-1" style={{ color: MUTED }}>NEEDS</div>
             {needsRows.map((row) => {
               const cat = data.categories.find((c) => c.name === row.label);
               return (
@@ -964,7 +964,7 @@ export default function BudgetView({
         )}
         {wantsRows.length > 0 && (
           <>
-            <div className={`text-label mb-1 ${needsRows.length > 0 ? "mt-4" : "mt-0"}`} style={{ color: MUTED }}>WANTS</div>
+            <div className={`text-[11px] mb-1 ${needsRows.length > 0 ? "mt-4" : "mt-0"}`} style={{ color: MUTED }}>WANTS</div>
             {wantsRows.map((row) => {
               const cat = data.categories.find((c) => c.name === row.label);
               return (
@@ -997,10 +997,10 @@ export default function BudgetView({
           investment destinations — a different, deliberate number. */}
       <div className="mt-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-num-md font-bold" style={{ color: INK }}>
+          <h2 className="text-lg font-bold" style={{ color: INK }}>
             Savings
             {data.savedRows.length > 0 && (
-              <span className="num ml-3 text-sm2 font-semibold" style={{ color: GOOD }}>{usd(data.totalSaved)}</span>
+              <span className="num ml-3 text-[13px] font-semibold" style={{ color: GOOD }}>{usd(data.totalSaved)}</span>
             )}
           </h2>
           <button
@@ -1013,7 +1013,7 @@ export default function BudgetView({
           </button>
         </div>
         {data.savedRows.length === 0 && (
-          <div className="py-3 text-body" style={{ color: MUTED }}>
+          <div className="py-3 text-sm" style={{ color: MUTED }}>
             Nothing saved this month. Transfers into savings or investments land
             here automatically — or move any transaction here from its ⋯ menu.
           </div>

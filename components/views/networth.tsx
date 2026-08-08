@@ -200,7 +200,7 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
             ref={polyRef}
             points={ptStr}
             fill="none"
-            stroke={INK}
+            stroke={GOOD}
             strokeWidth={2}
             strokeDasharray={isAnimating ? pathLen ?? undefined : undefined}
             strokeDashoffset={dashOffset ?? undefined}
@@ -215,7 +215,7 @@ function LineChart({ points, animate, onScrub }: LineChartProps) {
           cx={lastPt.x}
           cy={lastPt.y}
           r={4}
-          fill={INK}
+          fill={GOOD}
           style={animate ? { transition: "cx 0.4s ease, cy 0.4s ease" } : undefined}
         />
       )}
@@ -401,7 +401,7 @@ function AccountRow({
         />
       ) : (
         <span
-          className="flex items-center justify-center shrink-0 text-label"
+          className="flex items-center justify-center shrink-0 text-[11px]"
           style={{
             width: 38,
             height: 38,
@@ -430,7 +430,7 @@ function AccountRow({
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") setEditing(false);
               }}
-              className="block w-full py-0.5 px-1.5 text-body font-semibold"
+              className="block w-full py-0.5 px-1.5 text-sm font-semibold"
               style={{
                 border: `1px solid ${error ? "#b04a3f" : MUTED}`,
                 borderRadius: 6,
@@ -441,12 +441,12 @@ function AccountRow({
             />
             {error && (
               <div className="mt-1 flex items-center gap-2">
-                <span className="text-xs2" style={{ color: "#b04a3f" }}>{error}</span>
+                <span className="text-xs" style={{ color: "#b04a3f" }}>{error}</span>
                 <button
                   type="button"
                   onClick={() => pendingValue && save(pendingValue)}
                   disabled={saving}
-                  className="text-xs2 font-semibold"
+                  className="text-xs font-semibold"
                   style={{ color: "#16181d", cursor: "pointer", textDecoration: "underline" }}
                 >
                   Retry
@@ -456,7 +456,7 @@ function AccountRow({
           </div>
         ) : (
           <b
-            className="block text-body font-semibold truncate"
+            className="block text-sm font-semibold truncate"
             style={{ color: INK, cursor: renamable ? "text" : undefined }}
             title={renamable ? "Double-click to rename" : undefined}
             onDoubleClick={renamable ? () => setEditing(true) : undefined}
@@ -468,14 +468,14 @@ function AccountRow({
           </b>
         )}
         {item.sub || subMask ? (
-          <span className="block text-xs2 truncate" style={{ color: MUTED }}>
+          <span className="block text-xs truncate" style={{ color: MUTED }}>
             {[item.sub, subMask].filter(Boolean).join(" · ")}
           </span>
         ) : null}
       </span>
       {/* .val */}
       <span
-        className="num text-body text-right font-semibold"
+        className="num text-sm text-right font-semibold"
         style={{ color: valColor, fontWeight: item.value === 0 ? 400 : 600 }}
       >
         {usd(item.value)}
@@ -499,7 +499,7 @@ function AccountGroup({
     <div>
       {/* .subhead */}
       <div
-        className="text-label mt-4 mb-1"
+        className="text-[11px] mt-4 mb-1"
         style={{
           textTransform: "uppercase",
           letterSpacing: "0.06em",
@@ -549,14 +549,14 @@ function UmbrellaCard({
       {/* .spread header */}
       <div className="flex items-center justify-between mb-1">
         <h2
-          className="text-num-md font-bold"
+          className="text-lg font-bold"
           style={{ color: INK }}
         >
           {label}
         </h2>
         {/* .amt */}
         <span
-          className="num text-num-md font-extrabold"
+          className="num text-lg font-extrabold"
           style={{ color: pos ? GOOD : BAD }}
         >
           {usd(total)}
@@ -646,12 +646,12 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
           <div className="flex items-start justify-between gap-2">
             <div>
               {/* label swaps to the scrubbed date while sliding the chart */}
-              <div className="text-xs2" style={{ color: MUTED }}>
+              <div className="text-xs" style={{ color: MUTED }}>
                 {scrub ? scrubLabel(scrub.date) : "Total Net Worth"}
               </div>
               {/* hero number — follows the scrub position */}
               <div
-                className="num text-display font-extrabold"
+                className="num text-4xl font-extrabold"
                 style={{
                   letterSpacing: "-0.02em",
                   color: INK,
@@ -661,11 +661,11 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
                 {usd((scrub ?? data).total)}
               </div>
               {/* delta — one line, single semantic color; recolors + recomputes per range */}
-              <div className="flex items-baseline gap-2 text-sm2">
+              <div className="flex items-baseline gap-2 text-[13px]">
                 {hasDelta ? (
                   <span className="num font-semibold" style={{ color: up ? GOOD : BAD }}>
                     {usdCompactK(Math.abs(deltaAbs))}{" "}
-                    <span className="text-xs2 font-normal">
+                    <span className="text-xs font-normal">
                       ({up ? "+" : "−"}{Math.abs(deltaPct)}% {RANGE_PERIOD[range]})
                     </span>
                   </span>
@@ -683,7 +683,7 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
                   key={r}
                   onClick={() => setRange(r)}
                   aria-pressed={r === range}
-                  className="text-xs2"
+                  className="text-xs"
                   style={{
                     all: "unset",
                     cursor: "pointer",
@@ -713,7 +713,7 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
         {/* ── allocation card ── */}
         <Card className={VIEW_CARD}>
           <h2
-            className="text-num-md font-bold mb-3"
+            className="text-lg font-bold mb-3"
             style={{ color: INK }}
           >
             Allocation
@@ -731,7 +731,7 @@ export default function NetworthView({ onLocked }: { onLocked: () => void }) {
                 /* .l */
                 <div
                   key={a.label}
-                  className="flex items-center gap-2 text-sm2"
+                  className="flex items-center gap-2 text-[13px]"
                   style={{
                     cursor: "default",
                     borderRadius: 6,

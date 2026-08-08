@@ -144,7 +144,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f2f3f5] text-[#16181d]">
+    <div className="flex min-h-screen flex-col bg-[#fafafa] text-[#16181d]">
       {/* Horizontal top bar at every width (per Alena 2026-07-22 —
           reverted from the sidebar experiment): brand left, tabs right,
           one line (Alena, 2026-07-29 — was brand-above-nav, misaligned
@@ -155,11 +155,11 @@ export default function Home() {
           narrower (max-w-[660px], left-anchored, no mx-auto here) to read
           as one card's width instead of stretching tabs to the far right
           of the full two-card row (Alena, 2026-07-30 — "too wide"). */}
-      <aside className="top-0 z-10 border-b border-[#e3e5e9] bg-[#f2f3f5] py-3">
+      <aside className="top-0 z-10 border-b border-[#e3e5e9] bg-[#fafafa] py-3">
         <div className="mx-auto flex w-full max-w-[1140px] px-4 sm:px-6 lg:px-9">
           <div className="flex w-full max-w-[660px] items-center justify-between gap-4">
             {/* wordmark only — the eye lives on the PIN gate (Alena, 2026-07-24) */}
-            <span className="shrink-0 text-h1 font-extrabold tracking-tight">Plutus</span>
+            <span className="shrink-0 text-xl font-extrabold tracking-tight">Plutus</span>
             <nav
               className="flex min-w-0 justify-end gap-1 overflow-x-auto"
               aria-label="Main"
@@ -170,7 +170,7 @@ export default function Home() {
                   onClick={() => pick(n.id)}
                   aria-pressed={view === n.id}
                   className={cn(
-                    "shrink-0 cursor-pointer rounded-xl px-3 py-2.5 text-left text-body font-semibold",
+                    "shrink-0 cursor-pointer rounded-xl px-3 py-2.5 text-left text-sm font-semibold",
                     view === n.id
                       ? "bg-[#16181d] text-white"
                       : "text-[#686d76] hover:bg-[#e9eaee] hover:text-[#16181d]",
@@ -300,15 +300,15 @@ function PinGate({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f2f3f5] text-[#16181d]">
+    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] text-[#16181d]">
       <Card className="w-[320px] rounded-2xl border-none p-6 shadow-sm">
         {/* stacked lockup — eye above wordmark (Alena, 2026-07-24) */}
         <div className="flex flex-col items-start gap-1">
           <PlutusMark />
-          <span className="text-h1 font-extrabold tracking-tight">Plutus</span>
+          <span className="text-xl font-extrabold tracking-tight">Plutus</span>
         </div>
         {state !== "checking" && (
-          <div className="mt-4 text-h2 font-bold">
+          <div className="mt-4 text-[15px] font-bold">
             {setup ? "Create a 6-digit PIN" : "Enter your 6-digit PIN"}
           </div>
         )}
@@ -326,7 +326,7 @@ function PinGate({
                 setPin(raw.replace(/\D/g, ""));
               }}
               onKeyDown={(e) => e.key === "Enter" && !setup && submit()}
-              className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-num-md tracking-[.4em]"
+              className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-lg tracking-[.4em]"
               aria-label="PIN"
             />
             {setup && (
@@ -341,7 +341,7 @@ function PinGate({
                   setConfirm(raw.replace(/\D/g, ""));
                 }}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
-                className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-num-md tracking-[.4em]"
+                className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-lg tracking-[.4em]"
                 aria-label="Confirm PIN"
                 placeholder="confirm"
               />
@@ -349,10 +349,10 @@ function PinGate({
             {/* one slot for hint and error so they never stack — a submitted
                 error outranks the live typing hint. */}
             {error ? (
-              <div className="text-xs2 text-[#b04a3f]">{error}</div>
+              <div className="text-xs text-[#b04a3f]">{error}</div>
             ) : (
               badChar && (
-                <div className="text-xs2 text-[#686d76]">Digits only — 6-digit PIN</div>
+                <div className="text-xs text-[#686d76]">Digits only — 6-digit PIN</div>
               )
             )}
             <Button
@@ -362,7 +362,7 @@ function PinGate({
             >
               {setup ? "Set PIN" : "Unlock"}
             </Button>
-            <div className="text-xs2 text-[#686d76]">
+            <div className="text-xs text-[#686d76]">
               Locks itself after 15 minutes idle.
             </div>
           </div>
