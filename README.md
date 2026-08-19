@@ -23,7 +23,7 @@ It has a Next.js frontend and API in one process, an encrypted SQLite database (
 - `components/` - views and UI primitives (shadcn/Radix, token-based design system)
 - `lib/` - database layer and migrations, Plaid sync, cash-flow derivation, secrets
 - `lib/seed-config.ts` - fake demo data used by demo mode
-- `scripts/cli.ts` - ops CLI: `sync`, `snapshot`, `categorize`, `categorize-ai`, `month-close`, `month-new`
+- `scripts/cli.ts` - ops CLI: `sync`, `snapshot`, `categorize`, `categorize-ai`, `audit-income`, `month-close`, `month-new`
 - `scripts/backup-db.ts` - encrypted single-file backup (`pnpm backup`, keeps the last 8)
 
 ## Prerequisites

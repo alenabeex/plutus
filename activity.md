@@ -20,6 +20,11 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 
 (none)
 
+### 2026-08-19
+
+- `[FILE]` Income-capture audit + fix (Alena ask: "missing some income numbers", transfers/cash deposits). Root cause in `lib/derive.ts`: the blanket `TRANSFER_*` pfc match swallowed Plaid's `TRANSFER_IN_DEPOSIT` (cash/ATM/check deposits), and transfer-shaped bank text like "ACH TRANSFER from EMPLOYER" beat an `INCOME_*` pfc — both vanished from Cash Flow income. Fix: income fingerprints (pfc `INCOME_*`, pfc `TRANSFER_IN_DEPOSIT`, deposit text — cash/atm/check/mobile/remote/counter/branch/direct deposit) now win over transferish for inflows into cash/income-role accounts; own-account moves (`TRANSFER_IN_ACCOUNT_TRANSFER`, "transfer from savings"), card payments, and P2P cashouts stay transfers. One-time idempotent upgrade pass (same pattern as the 'saved' one — safe because manual moves never write 'transfer') flips existing machine-made 'transfer' inflows on the next `categorize`/sync. New read-only `audit-income` CLI command lists every benched cash-account inflow: fingerprint hits marked "will recapture", the rest (e.g. Zelle "transfer from" inflows) held for manual review via the app's txn popover; amounts gated behind `--real`/`FT_DEMO` per AGENTS.md rule 5. Verified end-to-end on demo db (audit → categorize → audit; recaptured rows land in `cashflowView` income; Venmo cashout / CC payment untouched); 8 new vitest cases in `lib/__tests__/classify-transactions.test.ts`; typecheck + lint + all 20 tests clean.
+- `[CONFIG]` `pnpm-workspace.yaml` gains `allowBuilds: better-sqlite3-multiple-ciphers` — pnpm ≥10 ignores the old `pnpm.onlyBuiltDependencies` key in package.json and refused to build the native module, breaking install/tests on a fresh checkout.
+
 ### 2026-08-01 (later)
 
 - `[FILE]` **LICENSE added — MIT**, copyright "Ai Ling (Alena) You". Chosen over AGPL: framing is permanently-free portfolio project with no monetization path to protect, and MIT matches the borjasolerme coding-workflow skill the repo's practice section already binds to. Unblocks public use — the repo had been public with no license, which legally permits nobody to use, fork, or redistribute it.

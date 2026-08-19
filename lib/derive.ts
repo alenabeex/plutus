@@ -28,6 +28,26 @@ const isTransferText = (hay: string) => TRANSFER_PATTERNS.some((p) => hay.includ
 const isTransferPfc = (pfc: string | null) =>
   !!pfc && (pfc.startsWith("TRANSFER_") || pfc.includes("CREDIT_CARD_PAYMENT"));
 
+// Income fingerprints for inflows that the transfer patterns would otherwise
+// swallow (audit 2026-08-19: "missing income numbers"). Two real-world traps:
+// - Plaid tags cash/ATM/check deposits TRANSFER_IN_DEPOSIT, so the blanket
+//   TRANSFER_ prefix match above erased them from income.
+// - Payroll often arrives with bank text like "ACH TRANSFER from EMPLOYER",
+//   which hits the text patterns even when pfc says INCOME_WAGES.
+// These win over transferish for money entering a cash/income account. Own-
+// account moves stay transfers: Plaid tags those TRANSFER_IN_ACCOUNT_TRANSFER
+// / _SAVINGS, and their bank text says "transfer", not "deposit".
+const DEPOSIT_PATTERNS = [
+  "cash deposit", "atm deposit", "check deposit", "mobile deposit",
+  "remote deposit", "counter deposit", "branch deposit", "deposit at",
+  "direct deposit", "direct dep", "mobile check",
+];
+const isDepositText = (hay: string) => DEPOSIT_PATTERNS.some((p) => hay.includes(p));
+const isIncomePfc = (pfc: string | null) => !!pfc && pfc.startsWith("INCOME");
+const isDepositPfc = (pfc: string | null) => pfc === "TRANSFER_IN_DEPOSIT";
+const isIncomeish = (pfc: string | null, hay: string) =>
+  isIncomePfc(pfc) || isDepositPfc(pfc) || isDepositText(hay);
+
 // Saved fingerprints: money leaving a cash account FOR an investment or
 // savings destination. These are income that became investments — they get
 // their own 'saved' class (and Cash Flow section) instead of vanishing as
@@ -84,6 +104,10 @@ export function classifyTransactions(d: Database.Database = db()): number {
     // vanguard" is savings, not noise — but only for money leaving a cash
     // account. Card payments/P2P stay transfers.
     else if (savedish && (role === "both" || role === "income") && t.amount > 0) klass = "saved";
+    // income fingerprints win the same way on the inflow side: a cash/check
+    // deposit or payroll-pfc'd inflow is income even when its bank text or
+    // TRANSFER_IN_DEPOSIT pfc smells like a transfer.
+    else if (t.amount < 0 && (role === "both" || role === "income") && isIncomeish(t.pfc, hay)) klass = "income";
     else if (transferish) klass = "transfer";
     else if (t.amount > 0) klass = "expense"; // money out
     else if (role === "both" || role === "income") klass = "income"; // money into a cash account
@@ -118,7 +142,84 @@ export function classifyTransactions(d: Database.Database = db()): number {
     upd.run("saved", t.id);
     n++;
   }
+
+  // Same one-time upgrade on the inflow side (audit 2026-08-19): machine-made
+  // 'transfer' rows that are really deposits/payroll become 'income'. Safe for
+  // the same reason as above — manual moves never write 'transfer' — and
+  // idempotent: after the flip, the row no longer matches txn_class='transfer'.
+  const legacyIn = d.prepare(
+    `SELECT t.id, t.name, t.merchant, t.amount, t.pfc,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount < 0`,
+  ).all() as {
+    id: number; name: string | null; merchant: string | null; amount: number; pfc: string | null;
+    kind: string; institution: string | null; acct_name: string; cashflow_role: string | null;
+  }[];
+  for (const t of legacyIn) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "both" && role !== "income") continue;
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    if (!isIncomeish(t.pfc, hay)) continue;
+    upd.run("income", t.id);
+    n++;
+  }
   return n;
+}
+
+/* ── income-capture audit (2026-08-19) ──────────────────────────────────── */
+
+export interface IncomeAuditRow {
+  id: number; date: string; label: string; amount: number; acct: string;
+  pfc: string | null;
+  verdict: "will-reclassify" | "review"; // income fingerprint hit vs needs a human
+  reason: string;                        // which fingerprint matched / why held back
+}
+
+/** Read-only sweep for the "missing income" audit: every settled inflow into
+ *  a cash/income-role account that classification benched as 'transfer'.
+ *  Rows matching the income fingerprints report the exact match (the upgrade
+ *  pass in classifyTransactions will flip them); the rest are listed for
+ *  manual review with the transfer fingerprint that caught them, so nothing
+ *  disappears silently. Mutates nothing. */
+export function auditIncomeCandidates(d: Database.Database = db()): IncomeAuditRow[] {
+  const rows = d.prepare(
+    `SELECT t.id, t.date, t.name, t.merchant,
+            COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
+            t.amount, t.pfc,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role,
+            COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount < 0
+     ORDER BY t.date DESC, t.id DESC`,
+  ).all() as {
+    id: number; date: string; name: string | null; merchant: string | null;
+    label: string; amount: number; pfc: string | null;
+    kind: string; institution: string | null; acct_name: string;
+    cashflow_role: string | null; acct: string;
+  }[];
+
+  const out: IncomeAuditRow[] = [];
+  for (const t of rows) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "both" && role !== "income") continue;
+    // same haystack the classifier uses, so verdicts match what a re-run does
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    let verdict: IncomeAuditRow["verdict"];
+    let reason: string;
+    if (isIncomePfc(t.pfc)) { verdict = "will-reclassify"; reason = `pfc ${t.pfc}`; }
+    else if (isDepositPfc(t.pfc)) { verdict = "will-reclassify"; reason = "pfc TRANSFER_IN_DEPOSIT"; }
+    else if (isDepositText(hay)) {
+      verdict = "will-reclassify";
+      reason = `text "${DEPOSIT_PATTERNS.find((p) => hay.includes(p))}"`;
+    } else {
+      verdict = "review";
+      const pat = TRANSFER_PATTERNS.find((p) => hay.includes(p));
+      reason = pat ? `text "${pat}"` : t.pfc ? `pfc ${t.pfc}` : "account role";
+    }
+    out.push({ id: t.id, date: t.date, label: t.label, amount: t.amount, acct: t.acct, pfc: t.pfc, verdict, reason });
+  }
+  return out;
 }
 
 /* ── categorization (plan T4.2) ─────────────────────────────────────────── */
