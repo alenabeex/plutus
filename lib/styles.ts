@@ -5,7 +5,7 @@ import { INK, SOFT } from "@/lib/colors";
 // (github.com/shadcn-ui/ui new-york style), swapped in 2026-08-07 to
 // replace the non-canonical "radix-rhea" radius-4xl/--card-spacing scheme.
 export const CARD =
-  "rounded-xl bg-white p-6 shadow-[0_1px_2px_rgba(16,17,20,0.05)] border border-[#e4e4e7]";
+  "rounded-xl bg-white p-6 shadow-[0_1px_2px_rgba(16,17,20,0.05)] border border-[rgba(228,228,231,.6)]";
 
 // ⋯-popover standard (Alena, 2026-07-29): every popover menu in the app is a
 // stack of full-width rows with the SOFT rounded hover — the Export menu's

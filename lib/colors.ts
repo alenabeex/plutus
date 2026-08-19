@@ -9,7 +9,7 @@
 // border/accent/danger tokens copied over 2026-08-07.
 export const INK = "#18181b";
 export const MUTED = "#71717a";
-export const LINE = "#e4e4e7";
+export const LINE = "rgba(228,228,231,.6)"; // border-soft (networth-uiswap-concept.html) — 2026-08-07
 export const SOFT = "#f4f4f5";
 export const CARD = "#ffffff";
 export const GOOD = "#047857";

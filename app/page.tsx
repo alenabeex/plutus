@@ -150,37 +150,33 @@ export default function Home() {
           one line (Alena, 2026-07-29 — was brand-above-nav, misaligned
           against main's baseline). Outer div matches main's own
           positioning (mx-auto max-w-1140 + identical padding) purely so
-          the row starts at the same left edge as the cards — same fix as
-          2026-07-30's alignment pass. The nav row itself is capped
-          narrower (max-w-[660px], left-anchored, no mx-auto here) to read
-          as one card's width instead of stretching tabs to the far right
-          of the full two-card row (Alena, 2026-07-30 — "too wide"). */}
-      <aside className="top-0 z-10 border-b border-[#e3e5e9] bg-[#fafafa] py-3">
-        <div className="mx-auto flex w-full max-w-[1140px] px-4 sm:px-6 lg:px-9">
-          <div className="flex w-full max-w-[660px] items-center justify-between gap-4">
-            {/* wordmark only — the eye lives on the PIN gate (Alena, 2026-07-24) */}
-            <span className="shrink-0 text-xl font-extrabold tracking-tight">Plutus</span>
-            <nav
-              className="flex min-w-0 justify-end gap-1 overflow-x-auto"
-              aria-label="Main"
-            >
-              {NAV.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => pick(n.id)}
-                  aria-pressed={view === n.id}
-                  className={cn(
-                    "shrink-0 cursor-pointer rounded-xl px-3 py-2.5 text-left text-sm font-semibold",
-                    view === n.id
-                      ? "bg-[#16181d] text-white"
-                      : "text-[#686d76] hover:bg-[#e9eaee] hover:text-[#16181d]",
-                  )}
-                >
-                  {n.label}
-                </button>
-              ))}
-            </nav>
-          </div>
+          the row starts at the same left edge as the cards.
+          2026-08-07 (Alena): nav pushed to the far right edge of the full
+          1140px row — supersedes the 2026-07-30 660px-cap/"too wide" call. */}
+      <aside className="top-0 z-10 border-b border-[rgba(228,228,231,.6)] bg-[#fafafa] py-3">
+        <div className="mx-auto flex w-full max-w-[1140px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-9">
+          {/* wordmark only — the eye lives on the PIN gate (Alena, 2026-07-24) */}
+          <span className="shrink-0 text-xl font-extrabold tracking-tight">Plutus</span>
+          <nav
+            className="flex min-w-0 justify-end gap-1 overflow-x-auto"
+            aria-label="Main"
+          >
+            {NAV.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => pick(n.id)}
+                aria-pressed={view === n.id}
+                className={cn(
+                  "shrink-0 cursor-pointer rounded-xl px-3 py-2.5 text-left text-sm font-semibold",
+                  view === n.id
+                    ? "bg-[#16181d] text-white"
+                    : "text-[#686d76] hover:bg-[#e9eaee] hover:text-[#16181d]",
+                )}
+              >
+                {n.label}
+              </button>
+            ))}
+          </nav>
         </div>
       </aside>
 
@@ -326,7 +322,7 @@ function PinGate({
                 setPin(raw.replace(/\D/g, ""));
               }}
               onKeyDown={(e) => e.key === "Enter" && !setup && submit()}
-              className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-lg tracking-[.4em]"
+              className="num rounded-lg border border-[rgba(228,228,231,.6)] px-3 py-2 text-center text-lg tracking-[.4em]"
               aria-label="PIN"
             />
             {setup && (
@@ -341,7 +337,7 @@ function PinGate({
                   setConfirm(raw.replace(/\D/g, ""));
                 }}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
-                className="num rounded-lg border border-[#e3e5e9] px-3 py-2 text-center text-lg tracking-[.4em]"
+                className="num rounded-lg border border-[rgba(228,228,231,.6)] px-3 py-2 text-center text-lg tracking-[.4em]"
                 aria-label="Confirm PIN"
                 placeholder="confirm"
               />

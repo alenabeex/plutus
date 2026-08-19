@@ -69,8 +69,8 @@
     --accent: #f4f4f5;
     --accent-foreground: #18181b;
     --destructive: #be123c;
-    --border: #e4e4e7;
-    --input: #e4e4e7;
+    --border: rgba(228,228,231,.6);
+    --input: rgba(228,228,231,.6);
     --ring: #a1a1aa;
     --success: #047857;
     --success-foreground: #fafafa;
@@ -86,7 +86,7 @@
     --sidebar-primary-foreground: #fafafa;
     --sidebar-accent: #f4f4f5;
     --sidebar-accent-foreground: #18181b;
-    --sidebar-border: #e4e4e7;
+    --sidebar-border: rgba(228,228,231,.6);
     --sidebar-ring: #a1a1aa;
 }
 
