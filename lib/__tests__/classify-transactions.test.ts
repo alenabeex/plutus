@@ -68,6 +68,36 @@ describe("classifyTransactions — income capture (deposits / transfer-shaped pa
     expect(classOf(d, ccPay)).toBe("transfer");
   });
 
+  // Regression: TRANSFER_IN_DEPOSIT is a weak signal — banks tag own-account
+  // pulls with it too. If it outranks transfer/saved text, a brokerage or HYSA
+  // withdrawal gets booked as income even though the outbound leg was already
+  // counted as 'saved' — the same dollars twice.
+  it("keeps deposit-pfc inflows as transfers when the text says own-account move", () => {
+    const savings = txn(d, { name: "ONLINE TRANSFER FROM SAVINGS", amount: -500, pfc: "TRANSFER_IN_DEPOSIT" });
+    const venmo = txn(d, { name: "VENMO CASHOUT", amount: -60, pfc: "TRANSFER_IN_DEPOSIT" });
+    const vanguard = txn(d, { name: "INTERNAL TRANSFER FROM VANGUARD", amount: -1000, pfc: "TRANSFER_IN_DEPOSIT" });
+    const hysa = txn(d, { name: "HYSA WITHDRAWAL", amount: -800, pfc: "TRANSFER_IN_DEPOSIT" });
+    classifyTransactions(d);
+    expect(classOf(d, savings)).toBe("transfer");
+    expect(classOf(d, venmo)).toBe("transfer");
+    expect(classOf(d, vanguard)).toBe("transfer");
+    expect(classOf(d, hysa)).toBe("transfer");
+  });
+
+  it("still lets pfc INCOME_* win over transfer text (payroll outranks everything)", () => {
+    const id = txn(d, { name: "ONLINE TRANSFER FROM ACME PAYROLL", amount: -2600, pfc: "INCOME_WAGES" });
+    classifyTransactions(d);
+    expect(classOf(d, id)).toBe("income");
+  });
+
+  it("does not upgrade legacy transfer rows that are own-account pulls", () => {
+    const pull = txn(d, { name: "ONLINE TRANSFER FROM SAVINGS", amount: -500, pfc: "TRANSFER_IN_DEPOSIT", txn_class: "transfer" });
+    const deposit = txn(d, { name: "ATM CASH DEPOSIT", amount: -400, pfc: "TRANSFER_IN_DEPOSIT", txn_class: "transfer" });
+    classifyTransactions(d);
+    expect(classOf(d, pull)).toBe("transfer");
+    expect(classOf(d, deposit)).toBe("income");
+  });
+
   it("does not let deposit fingerprints turn outflows into income", () => {
     const id = txn(d, { name: "CHECK DEPOSIT RETURN ITEM", amount: 250 });
     classifyTransactions(d);
@@ -99,6 +129,26 @@ describe("auditIncomeCandidates", () => {
     const zelle = rows.find((r) => r.label.includes("ZELLE"))!;
     expect(zelle.verdict).toBe("review");
     expect(zelle.reason).toContain("transfer from");
+  });
+
+  // The audit's verdict must be the classifier's decision, not a second
+  // opinion — a row it calls "will-reclassify" has to actually flip.
+  it("agrees with what classifyTransactions does to every row it reports", () => {
+    txn(d, { name: "ATM CASH DEPOSIT", amount: -400, pfc: "TRANSFER_IN_DEPOSIT", txn_class: "transfer" });
+    txn(d, { name: "ONLINE TRANSFER FROM SAVINGS", amount: -500, pfc: "TRANSFER_IN_DEPOSIT", txn_class: "transfer" });
+    txn(d, { name: "INTERNAL TRANSFER FROM VANGUARD", amount: -1000, pfc: "TRANSFER_IN_DEPOSIT", txn_class: "transfer" });
+    txn(d, { name: "MOBILE CHECK DEPOSIT", amount: -250, txn_class: "transfer" });
+    txn(d, { name: "ONLINE TRANSFER FROM ACME PAYROLL", amount: -2600, pfc: "INCOME_WAGES", txn_class: "transfer" });
+
+    const predicted = auditIncomeCandidates(d);
+    classifyTransactions(d);
+    for (const r of predicted) {
+      expect({ label: r.label, klass: classOf(d, r.id) }).toEqual({
+        label: r.label,
+        klass: r.verdict === "will-reclassify" ? "income" : "transfer",
+      });
+    }
+    expect(predicted.filter((r) => r.verdict === "will-reclassify")).toHaveLength(3);
   });
 
   it("mutates nothing", () => {
