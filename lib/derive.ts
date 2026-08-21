@@ -28,6 +28,23 @@ const isTransferText = (hay: string) => TRANSFER_PATTERNS.some((p) => hay.includ
 const isTransferPfc = (pfc: string | null) =>
   !!pfc && (pfc.startsWith("TRANSFER_") || pfc.includes("CREDIT_CARD_PAYMENT"));
 
+// Income fingerprints for inflows that the transfer patterns would otherwise
+// swallow (audit 2026-08-19: "missing income numbers"). Two real-world traps:
+// - Plaid tags cash/ATM/check deposits TRANSFER_IN_DEPOSIT, so the blanket
+//   TRANSFER_ prefix match above erased them from income.
+// - Payroll often arrives with bank text like "ACH TRANSFER from EMPLOYER",
+//   which hits the text patterns even when pfc says INCOME_WAGES.
+const DEPOSIT_PATTERNS = [
+  "cash deposit", "atm deposit", "check deposit", "mobile deposit",
+  "remote deposit", "counter deposit", "branch deposit", "deposit at",
+  "direct deposit", "direct dep", "mobile check",
+];
+const isIncomePfc = (pfc: string | null) => !!pfc && pfc.startsWith("INCOME");
+// TRANSFER_IN_DEPOSIT is a WEAK signal: Plaid uses it for real deposits, but
+// banks also tag own-account pulls with it. It never outranks explicit
+// transfer/saved text — see incomeSignal.
+const isDepositPfc = (pfc: string | null) => pfc === "TRANSFER_IN_DEPOSIT";
+
 // Saved fingerprints: money leaving a cash account FOR an investment or
 // savings destination. These are income that became investments — they get
 // their own 'saved' class (and Cash Flow section) instead of vanishing as
@@ -41,6 +58,34 @@ const SAVED_PATTERNS = [
   "hysa", "high yield sav", "to savings", "savings transfer",
 ];
 const isSavedText = (hay: string) => SAVED_PATTERNS.some((p) => hay.includes(p));
+
+/** Is this INFLOW income, and on what evidence? One decision point shared by
+ *  the classifier, its legacy-upgrade pass, and the audit CLI, so all three
+ *  can never disagree (review 2026-08-19).
+ *
+ *  Precedence, strongest first:
+ *   1. pfc INCOME_* — Plaid says wages/interest/dividend. Beats everything;
+ *      this is the payroll-through-a-"transfer"-description case.
+ *   2. saved/transfer text — "internal transfer from vanguard", "online
+ *      transfer from savings", "venmo cashout". These are own-account pulls,
+ *      NOT income: the outbound leg was already booked (often as 'saved'), so
+ *      calling the return leg income double-counts it. This is why the weak
+ *      deposit signals below must never outrank them.
+ *   3. deposit pfc / deposit text — cash, ATM, check, mobile deposits. */
+function incomeSignal(pfc: string | null, hay: string): { income: boolean; reason: string } {
+  if (isIncomePfc(pfc)) return { income: true, reason: `pfc ${pfc}` };
+
+  const savedPat = SAVED_PATTERNS.find((p) => hay.includes(p));
+  if (savedPat) return { income: false, reason: `saved text "${savedPat}"` };
+  const transferPat = TRANSFER_PATTERNS.find((p) => hay.includes(p));
+  if (transferPat) return { income: false, reason: `transfer text "${transferPat}"` };
+
+  if (isDepositPfc(pfc)) return { income: true, reason: "pfc TRANSFER_IN_DEPOSIT" };
+  const depositPat = DEPOSIT_PATTERNS.find((p) => hay.includes(p));
+  if (depositPat) return { income: true, reason: `text "${depositPat}"` };
+
+  return { income: false, reason: pfc ? `pfc ${pfc}` : "no income fingerprint" };
+}
 
 /** Account's role in cash flow. Explicit accounts.cashflow_role wins; else:
  *  P2P wallets (Venmo/Cash App/PayPal) spend but never earn — their inflows
@@ -84,6 +129,9 @@ export function classifyTransactions(d: Database.Database = db()): number {
     // vanguard" is savings, not noise — but only for money leaving a cash
     // account. Card payments/P2P stay transfers.
     else if (savedish && (role === "both" || role === "income") && t.amount > 0) klass = "saved";
+    // income fingerprints on the inflow side: payroll wins outright, deposits
+    // win only when no transfer/saved text contradicts them (see incomeSignal).
+    else if (t.amount < 0 && (role === "both" || role === "income") && incomeSignal(t.pfc, hay).income) klass = "income";
     else if (transferish) klass = "transfer";
     else if (t.amount > 0) klass = "expense"; // money out
     else if (role === "both" || role === "income") klass = "income"; // money into a cash account
@@ -118,7 +166,77 @@ export function classifyTransactions(d: Database.Database = db()): number {
     upd.run("saved", t.id);
     n++;
   }
+
+  // Same one-time upgrade on the inflow side (audit 2026-08-19): machine-made
+  // 'transfer' rows that are really deposits/payroll become 'income'. Safe for
+  // the same reason as above — manual moves never write 'transfer' — and
+  // idempotent: after the flip, the row no longer matches txn_class='transfer'.
+  const legacyIn = d.prepare(
+    `SELECT t.id, t.name, t.merchant, t.amount, t.pfc,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount < 0`,
+  ).all() as {
+    id: number; name: string | null; merchant: string | null; amount: number; pfc: string | null;
+    kind: string; institution: string | null; acct_name: string; cashflow_role: string | null;
+  }[];
+  for (const t of legacyIn) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "both" && role !== "income") continue;
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    if (!incomeSignal(t.pfc, hay).income) continue;
+    upd.run("income", t.id);
+    n++;
+  }
   return n;
+}
+
+/* ── income-capture audit (2026-08-19) ──────────────────────────────────── */
+
+export interface IncomeAuditRow {
+  id: number; date: string; label: string; amount: number; acct: string;
+  pfc: string | null;
+  verdict: "will-reclassify" | "review"; // income fingerprint hit vs needs a human
+  reason: string;                        // which fingerprint matched / why held back
+}
+
+/** Read-only sweep for the "missing income" audit: every settled inflow into
+ *  a cash/income-role account that classification benched as 'transfer'.
+ *  Rows matching the income fingerprints report the exact match (the upgrade
+ *  pass in classifyTransactions will flip them); the rest are listed for
+ *  manual review with the transfer fingerprint that caught them, so nothing
+ *  disappears silently. Mutates nothing. */
+export function auditIncomeCandidates(d: Database.Database = db()): IncomeAuditRow[] {
+  const rows = d.prepare(
+    `SELECT t.id, t.date, t.name, t.merchant,
+            COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
+            t.amount, t.pfc,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role,
+            COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount < 0
+     ORDER BY t.date DESC, t.id DESC`,
+  ).all() as {
+    id: number; date: string; name: string | null; merchant: string | null;
+    label: string; amount: number; pfc: string | null;
+    kind: string; institution: string | null; acct_name: string;
+    cashflow_role: string | null; acct: string;
+  }[];
+
+  const out: IncomeAuditRow[] = [];
+  for (const t of rows) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "both" && role !== "income") continue;
+    // Same haystack AND same predicate the classifier uses — the audit reports
+    // the upgrade pass's decision, it never re-derives one (review 2026-08-19).
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    const { income, reason } = incomeSignal(t.pfc, hay);
+    out.push({
+      id: t.id, date: t.date, label: t.label, amount: t.amount, acct: t.acct, pfc: t.pfc,
+      verdict: income ? "will-reclassify" : "review", reason,
+    });
+  }
+  return out;
 }
 
 /* ── categorization (plan T4.2) ─────────────────────────────────────────── */

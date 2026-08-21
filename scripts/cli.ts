@@ -14,6 +14,9 @@
  *   month-close [YYYY-MM]    Close a budget month (default: latest open month). Requires --confirm.
  *   month-new                Roll over to the next month (copy fixed items, zero income/variable).
  *   categorize               Run the derivation pass (classify + rules) without a Plaid sync.
+ *   audit-income             Read-only sweep of transfer-classed inflows into cash accounts —
+ *                            flags deposits/payroll the classifier will recapture as income
+ *                            and lists the rest for manual review. Mutates nothing.
  *   categorize-ai            AI-name uncategorized merchants → new category rules (needs API key; no-op without).
  *   help                     Print this usage text.
  *
@@ -36,7 +39,10 @@ import { runPlaidSync } from "../lib/sync.js";
 import { createNewMonth, BudgetOpsError } from "../lib/budget-ops.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — relative import, tsx resolves it
-import { deriveAll } from "../lib/derive.js";
+import { deriveAll, auditIncomeCandidates } from "../lib/derive.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — relative import, tsx resolves it
+import type { IncomeAuditRow } from "../lib/derive.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — relative import, tsx resolves it
 import { aiCategorize } from "../lib/ai-categorize.js";
@@ -76,6 +82,10 @@ Commands:
                             zeroes income/variable.
   categorize               Run the derivation pass (classify income/expense/transfer, apply
                             category rules, materialize months, detect recurring) without a sync.
+  audit-income             Read-only: list settled inflows into cash accounts currently classed
+                            'transfer'. Deposit/payroll fingerprint hits are marked as income the
+                            next categorize/sync will recapture; the rest print for manual review
+                            (move them in the app's txn popover). Amounts need --real or FT_DEMO=1.
   categorize-ai            Send UNCATEGORIZED MERCHANT NAMES (nothing else — no amounts/dates)
                             to the Anthropic API; each answer becomes a category_rules row.
                             Needs ANTHROPIC_API_KEY or Keychain finance-anthropic-key; exits 0
@@ -211,6 +221,35 @@ function cmdMonthNew(): void {
   }
 }
 
+function cmdAuditIncome(): void {
+  const rows = auditIncomeCandidates() as IncomeAuditRow[];
+  if (rows.length === 0) {
+    console.log("No transfer-classed inflows into cash accounts — nothing benched that could be income.");
+    process.exit(0);
+  }
+
+  const recapture = rows.filter((r) => r.verdict === "will-reclassify");
+  const review = rows.filter((r) => r.verdict === "review");
+  console.log(`${rows.length} settled inflow(s) into cash accounts are classed 'transfer' (excluded from income):`);
+  console.log(`  ${recapture.length} match income fingerprints — next \`categorize\` or sync reclassifies them as income.`);
+  console.log(`  ${review.length} stay transfers — review below; move real income via the app's txn popover.\n`);
+
+  const print = (r: IncomeAuditRow) => {
+    const amt = ALLOW_RAW ? `$${(-r.amount).toFixed(2)}`.padStart(11) : "     (hidden)";
+    console.log(`  ${r.date}  ${amt}  ${r.label.slice(0, 40).padEnd(40)}  ${r.acct.slice(0, 20).padEnd(20)}  ${r.reason}`);
+  };
+  if (recapture.length > 0) {
+    console.log("WILL RECAPTURE AS INCOME:");
+    for (const r of recapture) print(r);
+  }
+  if (review.length > 0) {
+    console.log(`${recapture.length > 0 ? "\n" : ""}HELD AS TRANSFERS — REVIEW:`);
+    for (const r of review) print(r);
+  }
+  if (!ALLOW_RAW) console.log(`\n${RAW_NOTICE.trim()}`);
+  process.exit(0);
+}
+
 function cmdCategorize(): void {
   const result = deriveAll();
   console.log(
@@ -259,6 +298,9 @@ async function main(): Promise<void> {
       break;
     case "categorize":
       cmdCategorize();
+      break;
+    case "audit-income":
+      cmdAuditIncome();
       break;
     case "categorize-ai":
       await cmdCategorizeAi();
