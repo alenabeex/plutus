@@ -75,6 +75,8 @@ const isSavedText = (hay: string) => SAVED_PATTERNS.some((p) => hay.includes(p))
 function incomeSignal(pfc: string | null, hay: string): { income: boolean; reason: string } {
   if (isIncomePfc(pfc)) return { income: true, reason: `pfc ${pfc}` };
 
+  // Precedence note: the bare-pfc fallthrough at the bottom is why the
+  // text checks here must run first — a TRANSFER_IN pfc never outranks them.
   const savedPat = SAVED_PATTERNS.find((p) => hay.includes(p));
   if (savedPat) return { income: false, reason: `saved text "${savedPat}"` };
   const transferPat = TRANSFER_PATTERNS.find((p) => hay.includes(p));
@@ -84,7 +86,12 @@ function incomeSignal(pfc: string | null, hay: string): { income: boolean; reaso
   const depositPat = DEPOSIT_PATTERNS.find((p) => hay.includes(p));
   if (depositPat) return { income: true, reason: `text "${depositPat}"` };
 
-  return { income: false, reason: pfc ? `pfc ${pfc}` : "no income fingerprint" };
+  // Rule (Alena 2026-10-30): income is every cash-account inflow that is not
+  // a transfer or a card payment. A bare TRANSFER_IN_* pfc is not evidence of
+  // an own-account move — Plaid puts it on Zelle receipts and refunds too —
+  // so with no transfer/saved text above, only a card-payment pfc benches it.
+  if (pfc && pfc.includes("CREDIT_CARD_PAYMENT")) return { income: false, reason: `pfc ${pfc}` };
+  return { income: true, reason: pfc ? `pfc ${pfc}, no transfer fingerprint` : "no transfer fingerprint" };
 }
 
 /** Account's role in cash flow. Explicit accounts.cashflow_role wins; else:

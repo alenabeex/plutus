@@ -57,6 +57,10 @@ export interface SeedConfig {
 export const NEED_CATEGORIES = [
   "Rent / Housing", "Utilities", "Phone / Internet", "Insurance",
   "Medical / Health", "Apps / Subs",
+  // Business costs are obligations, not discretionary — one flat bucket, no
+  // sub-categories (Alena 2026-10-30). Business income has no category: income
+  // rows group by payer.
+  "Business Expense",
 ];
 export const WANT_CATEGORIES = [
   "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",

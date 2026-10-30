@@ -84,6 +84,31 @@ describe("classifyTransactions — income capture (deposits / transfer-shaped pa
     expect(classOf(d, hysa)).toBe("transfer");
   });
 
+  // Rule (Alena 2026-10-30): income is every cash-account inflow that is not
+  // a transfer or a card payment. Plaid's TRANSFER_IN_* alone is not evidence
+  // of an own-account move — Zelle receipts and refunds carry it too.
+  it("classes a TRANSFER_IN pfc inflow with no transfer text as income", () => {
+    const zelle = txn(d, { name: "ZELLE FROM SAM R", amount: -75, pfc: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    const refund = txn(d, { name: "AIRLINE REFUND", amount: -210, pfc: "TRANSFER_IN_OTHER_TRANSFER_IN" });
+    classifyTransactions(d);
+    expect(classOf(d, zelle)).toBe("income");
+    expect(classOf(d, refund)).toBe("income");
+  });
+
+  it("keeps card-payment pfc inflows out of income", () => {
+    const id = txn(d, { name: "CARDMEMBER SERV", amount: -120, pfc: "TRANSFER_IN_CREDIT_CARD_PAYMENT" });
+    classifyTransactions(d);
+    expect(classOf(d, id)).toBe("transfer");
+  });
+
+  it("upgrades legacy 'transfer' inflows that carry only a TRANSFER_IN pfc to income", () => {
+    const zelle = txn(d, { name: "ZELLE FROM SAM R", amount: -75, pfc: "TRANSFER_IN_ACCOUNT_TRANSFER", txn_class: "transfer" });
+    const own = txn(d, { name: "ONLINE TRANSFER FROM SAVINGS", amount: -500, pfc: "TRANSFER_IN_ACCOUNT_TRANSFER", txn_class: "transfer" });
+    classifyTransactions(d);
+    expect(classOf(d, zelle)).toBe("income");
+    expect(classOf(d, own)).toBe("transfer");
+  });
+
   it("still lets pfc INCOME_* win over transfer text (payroll outranks everything)", () => {
     const id = txn(d, { name: "ONLINE TRANSFER FROM ACME PAYROLL", amount: -2600, pfc: "INCOME_WAGES" });
     classifyTransactions(d);
