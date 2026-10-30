@@ -39,6 +39,7 @@ export interface SeedTransaction {
   name: string;
   merchant: string;
   amount: number;        // Plaid convention: positive = money out
+  pfc?: string;          // Plaid personal_finance_category primary, when the path under test needs it
 }
 export interface SeedConfig {
   accounts: SeedAccount[];
@@ -148,8 +149,10 @@ function demoLedger(): SeedTransaction[] {
     { accountCode: "RC", accountMask: "2043", day: 6,  name: "DOORDASH*THAI PALACE", merchant: "DoorDash", amount: 38.6 },
     { accountCode: "RC", accountMask: "2043", day: 21, name: "SHELL OIL 5744", merchant: "Shell", amount: 52.4 },
     { accountCode: "RC", accountMask: "2043", day: 24, name: "AMAZON MKTPL*88YT2", merchant: "Amazon", amount: 47.9 },
-    // Venmo = spending source; its cash-in is a transfer, never income
-    { accountCode: "VM", day: 10, name: "VENMO PAYMENT SAM R", merchant: "Venmo", amount: 45.0 },
+    // Venmo = spending source; its cash-in is a transfer, never income.
+    // The payment carries the TRANSFER_OUT pfc Plaid really sends for wallet
+    // payments — it must land as expense anyway (P2P wallet rule, derive.ts).
+    { accountCode: "VM", day: 10, name: "VENMO PAYMENT SAM R", merchant: "Venmo", amount: 45.0, pfc: "TRANSFER_OUT_ACCOUNT_TRANSFER" },
     { accountCode: "VM", day: 11, name: "VENMO CASHOUT FROM BANK", merchant: "Venmo", amount: -60.0 },
     // unknown merchant → uncategorized queue until a rule or AI names it
     { accountCode: "RC", accountMask: "2043", day: 14, name: "BLUE TOKAI ROASTERS SF", merchant: "Blue Tokai Roasters", amount: 21.5 },
