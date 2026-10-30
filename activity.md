@@ -94,3 +94,7 @@ Format: `### YYYY-MM-DD` then one line per action with tag prefix.
 ### 2026-08-20
 - `[FILE]` Created `CLAUDE.md` (settled-decisions working notes, pattern from Confide) + `.claude/rules/using-tokens.md` (path-scoped token enforcement: globals.css + lib/colors.ts only source, WCAG AA on new text colors, MENU_ITEM popover standard). From Confide-vs-Plutus design-context comparison.
 - `[GIT]` Committed + pushed to `github.com/alenabeex/plutus` (private): `2306f89..1f16ac1`, docs only.
+
+### 2026-10-30
+- `[FILE]` Cash Flow fix: P2P wallet payments-out (Venmo / Cash App / PayPal) now classify as `expense` even when Plaid tags them `TRANSFER_OUT_*` — previously every linked-Venmo send was benched as a transfer and never reached Cash Flow. Own-account text (cashout / transfer to bank) still keeps them transfers; wallet inflows stay transfers; credit cards unchanged. One-time upgrade pass flips already-classified wallet `transfer` outflows to `expense` on the next sync/derive (`lib/derive.ts`). Demo seed Venmo payment now carries the real `TRANSFER_OUT_ACCOUNT_TRANSFER` pfc so the demo exercises the path (`lib/seed-config.ts`, `lib/db.ts` seed insert). 5 new Vitest cases; 29/29 green. Verified in demo: Venmo $45.00 (demo number) lands under Expenses → Uncategorized.
+- `[CONFIG]` Added `.claude/launch.json` (`plutus-demo`: `FT_DEMO=1 pnpm dev` on 3000) so the harness-managed preview always boots demo mode.

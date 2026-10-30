@@ -157,3 +157,47 @@ describe("auditIncomeCandidates", () => {
     expect(classOf(d, id)).toBe("transfer");
   });
 });
+
+describe("classifyTransactions — P2P wallet spending (Venmo / Cash App / PayPal)", () => {
+  let d: Database.Database;
+  beforeEach(() => {
+    d = makeDb();
+    d.prepare(`INSERT INTO accounts (id, name, kind, institution) VALUES (3, 'Venmo', 'cash', 'Venmo')`).run();
+  });
+
+  // Plaid tags every wallet send TRANSFER_OUT_* — a pfc that must not bench
+  // real spending. Only own-account text (cashout / transfer to bank) does.
+  it("classes a wallet payment-out as expense despite its TRANSFER_OUT pfc", () => {
+    const pay = txn(d, { account_id: 3, name: "Venmo payment to Sam R", amount: 45, pfc: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    classifyTransactions(d);
+    expect(classOf(d, pay)).toBe("expense");
+  });
+
+  it("keeps wallet own-account moves (cashout / transfer to bank) as transfers", () => {
+    const cashout = txn(d, { account_id: 3, name: "VENMO CASHOUT TO BANK", amount: 60, pfc: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    const toBank = txn(d, { account_id: 3, name: "TRANSFER TO FIRST BANK CHECKING", amount: 120 });
+    classifyTransactions(d);
+    expect(classOf(d, cashout)).toBe("transfer");
+    expect(classOf(d, toBank)).toBe("transfer");
+  });
+
+  it("still benches wallet inflows as transfers (reimbursements, never income)", () => {
+    const inflow = txn(d, { account_id: 3, name: "Venmo payment from Sam R", amount: -45, pfc: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    classifyTransactions(d);
+    expect(classOf(d, inflow)).toBe("transfer");
+  });
+
+  it("upgrades machine-made 'transfer' wallet payments to expense", () => {
+    const old = txn(d, { account_id: 3, name: "Venmo payment to Sam R", amount: 45, pfc: "TRANSFER_OUT_ACCOUNT_TRANSFER", txn_class: "transfer" });
+    const ownMove = txn(d, { account_id: 3, name: "VENMO CASHOUT TO BANK", amount: 60, txn_class: "transfer" });
+    classifyTransactions(d);
+    expect(classOf(d, old)).toBe("expense");
+    expect(classOf(d, ownMove)).toBe("transfer");
+  });
+
+  it("leaves credit-card 'transfer' outflows alone in the upgrade pass", () => {
+    const balXfer = txn(d, { account_id: 2, name: "BALANCE TRANSFER", amount: 500, txn_class: "transfer" });
+    classifyTransactions(d);
+    expect(classOf(d, balXfer)).toBe("transfer");
+  });
+});

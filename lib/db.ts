@@ -256,7 +256,7 @@ function seed(d: Database.Database) {
       `SELECT id FROM accounts WHERE code = ? AND (mask = ? OR (? IS NULL AND mask IS NULL)) LIMIT 1`,
     );
     const insTxn = d.prepare(
-      `INSERT INTO transactions (account_id, date, name, merchant, amount, pending) VALUES (?,?,?,?,?,0)`,
+      `INSERT INTO transactions (account_id, date, name, merchant, amount, pfc, pending) VALUES (?,?,?,?,?,?,0)`,
     );
     const now = new Date();
     for (const t of cfg.transactions) {
@@ -266,7 +266,7 @@ function seed(d: Database.Database) {
       const m = new Date(now.getFullYear(), now.getMonth() + t.monthOffset, 1);
       const day = Math.min(t.day, new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate());
       const date = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      insTxn.run(row.id, date, t.name, t.merchant, t.amount);
+      insTxn.run(row.id, date, t.name, t.merchant, t.amount, t.pfc ?? null);
     }
   }
 

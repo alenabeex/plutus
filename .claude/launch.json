@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plutus-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["FT_DEMO=1", "pnpm", "dev"],
+      "port": 3000
+    }
+  ]
+}

@@ -132,6 +132,11 @@ export function classifyTransactions(d: Database.Database = db()): number {
     // income fingerprints on the inflow side: payroll wins outright, deposits
     // win only when no transfer/saved text contradicts them (see incomeSignal).
     else if (t.amount < 0 && (role === "both" || role === "income") && incomeSignal(t.pfc, hay).income) klass = "income";
+    // P2P wallet payments-out ARE the spending — but Plaid tags every wallet
+    // send TRANSFER_OUT_*, so the pfc alone must not bench them. Only explicit
+    // own-account text (cashout, transfer to bank) does. Credit cards keep the
+    // old rule: their transferish outflows are balance transfers, not spending.
+    else if (role === "spending" && t.kind !== "credit" && t.amount > 0 && !isTransferText(hay)) klass = "expense";
     else if (transferish) klass = "transfer";
     else if (t.amount > 0) klass = "expense"; // money out
     else if (role === "both" || role === "income") klass = "income"; // money into a cash account
@@ -164,6 +169,29 @@ export function classifyTransactions(d: Database.Database = db()): number {
     const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
     if (!isSavedText(hay)) continue;
     upd.run("saved", t.id);
+    n++;
+  }
+
+  // One-time upgrade for wallet spending benched before the P2P rule above
+  // existed (2026-10-30): machine-made 'transfer' outflows on a spending-role
+  // wallet become 'expense', unless own-account text keeps them transfers.
+  // Safe for the same reason as the other passes — manual moves never write
+  // 'transfer' — and idempotent: flipped rows stop matching the query.
+  const legacyWallet = d.prepare(
+    `SELECT t.id, t.name, t.merchant,
+            a.kind, a.institution, a.name AS acct_name, a.cashflow_role
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.txn_class = 'transfer' AND t.pending = 0 AND t.amount > 0`,
+  ).all() as {
+    id: number; name: string | null; merchant: string | null;
+    kind: string; institution: string | null; acct_name: string; cashflow_role: string | null;
+  }[];
+  for (const t of legacyWallet) {
+    const role = roleFor({ kind: t.kind, institution: t.institution, name: t.acct_name, cashflow_role: t.cashflow_role });
+    if (role !== "spending" || t.kind === "credit") continue;
+    const hay = `${t.merchant ?? ""} ${t.name ?? ""}`.toLowerCase();
+    if (isTransferText(hay)) continue;
+    upd.run("expense", t.id);
     n++;
   }
 
