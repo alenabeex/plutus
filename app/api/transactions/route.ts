@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { addManualTxn, type ManualTxnInput } from "@/lib/add-manual-txn";
 
 export const runtime = "nodejs";
 
@@ -126,4 +127,30 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
   }
 
   return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
+});
+
+// Manual cash entry (Alena 2026-10-30): a cash income, cash expense, or
+// saving with no linked account behind it, added from the Cash Flow cards.
+// Validation and the sign convention live in lib/add-manual-txn.ts (the
+// tested seam); this just maps its errors to 400s.
+export const POST = withJsonErrors(async (req: NextRequest) => {
+  const locked = requireUnlocked(req);
+  if (locked) return locked;
+
+  const body = (await req.json()) as Partial<ManualTxnInput>;
+  if (body.kind !== "income" && body.kind !== "expense" && body.kind !== "saved") {
+    return NextResponse.json({ ok: false, error: "bad kind" }, { status: 400 });
+  }
+  if (typeof body.date !== "string" || typeof body.label !== "string" || typeof body.amount !== "number") {
+    return NextResponse.json({ ok: false, error: "date, label and amount are required" }, { status: 400 });
+  }
+  try {
+    const id = addManualTxn(db(), {
+      kind: body.kind, date: body.date, label: body.label, amount: body.amount,
+      categoryId: typeof body.categoryId === "number" ? body.categoryId : undefined,
+    });
+    return withRefreshedSession(req, { ok: true, id });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "Couldn't add" }, { status: 400 });
+  }
 });
