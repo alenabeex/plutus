@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { addManualTxn, ManualTxnError, type ManualTxnInput } from "@/lib/add-manual-txn";
+import { isValidMonthKey } from "@/lib/format";
 
 export const runtime = "nodejs";
 
-// The one write path the read-only Cash Flow redesign allows (spec
-// 2026-07-27's own rule: edit the transaction, never the sheet). Two actions:
+// The write paths the read-only Cash Flow redesign allows (spec 2026-07-27's
+// own rule: edit the transaction, never the sheet). PUT edits one existing
+// transaction; POST (bottom of file) adds a manual cash entry. PUT actions:
 //  - "category": recategorize one transaction, then learn a category_rules
 //    row for its merchant (derive.ts:83's design — "corrections made in the
 //    app become new rows in category_rules and win over these") so future
@@ -126,4 +129,44 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
   }
 
   return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
+});
+
+// Manual cash entry (Alena 2026-10-30): a cash income, cash expense, or
+// saving with no linked account behind it, added from the Cash Flow cards.
+// Validation and the sign convention live in lib/add-manual-txn.ts (the
+// tested seam). Only its ManualTxnError becomes a 400 — anything else (DB
+// open, lock, disk) falls through to withJsonErrors' generic 500 so driver
+// text never reaches the client.
+export const POST = withJsonErrors(async (req: NextRequest) => {
+  const locked = requireUnlocked(req);
+  if (locked) return locked;
+
+  const raw = await req.json().catch(() => null);
+  if (typeof raw !== "object" || raw === null) {
+    return NextResponse.json({ ok: false, error: "invalid body" }, { status: 400 });
+  }
+  const body = raw as Partial<ManualTxnInput>;
+  if (body.kind !== "income" && body.kind !== "expense" && body.kind !== "saved") {
+    return NextResponse.json({ ok: false, error: "bad kind" }, { status: 400 });
+  }
+  if (typeof body.date !== "string" || typeof body.label !== "string" || typeof body.amount !== "number") {
+    return NextResponse.json({ ok: false, error: "invalid date, label or amount" }, { status: 400 });
+  }
+  if (body.month !== undefined && !isValidMonthKey(body.month)) {
+    return NextResponse.json({ ok: false, error: "bad-month" }, { status: 400 });
+  }
+  const d = db();
+  try {
+    const id = addManualTxn(d, {
+      kind: body.kind, date: body.date, label: body.label, amount: body.amount,
+      categoryId: typeof body.categoryId === "number" ? body.categoryId : undefined,
+      month: body.month,
+    });
+    return withRefreshedSession(req, { ok: true, id });
+  } catch (e) {
+    if (e instanceof ManualTxnError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
+    throw e;
+  }
 });

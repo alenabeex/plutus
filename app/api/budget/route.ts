@@ -25,8 +25,9 @@ function txnMonthMin(d: ReturnType<typeof db>): string | null {
  *  derive everything live via cashflowView. Sheet-imported months — and any
  *  manual month left from before the read-only change — fall back to their
  *  stored JSON, with empty txns so the view renders them without drill-down.
- *  The only write path is POST { action: "sync-month" } below and PUT
- *  /api/transactions — nothing here writes. */
+ *  The write paths are POST { action: "sync-month" } below and PUT / POST
+ *  /api/transactions (edit one txn / add a manual cash entry) — nothing in
+ *  this function writes. */
 function buildCashflowData(month: string): CashflowData {
   const d = db();
   const row = d.prepare(`SELECT * FROM budget_months WHERE month = ?`).get(month) as {
