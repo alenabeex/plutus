@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
-import { addManualTxn } from "../add-manual-txn";
+import { addManualTxn, ManualTxnError } from "../add-manual-txn";
 import { cashflowView } from "../derive";
 
 function makeDb(): Database.Database {
@@ -55,13 +55,25 @@ describe("addManualTxn", () => {
     expect(row(d, id).txn_class).toBe("saved");
   });
 
-  it("rejects bad input instead of writing", () => {
-    expect(() => addManualTxn(d, { kind: "income", date: "2026-10-12", label: "", amount: 10 })).toThrow();
-    expect(() => addManualTxn(d, { kind: "income", date: "2026-10-12", label: "x", amount: 0 })).toThrow();
-    expect(() => addManualTxn(d, { kind: "income", date: "2026-10-12", label: "x", amount: -5 })).toThrow();
-    expect(() => addManualTxn(d, { kind: "income", date: "10/12/2026", label: "x", amount: 5 })).toThrow();
-    expect(() => addManualTxn(d, { kind: "expense", date: "2026-10-12", label: "x", amount: 5, categoryId: 999 })).toThrow();
+  it("rejects bad input with ManualTxnError instead of writing", () => {
+    const bad = (input: Parameters<typeof addManualTxn>[1]) =>
+      expect(() => addManualTxn(d, input)).toThrow(ManualTxnError);
+    bad({ kind: "income", date: "2026-10-12", label: "", amount: 10 });
+    bad({ kind: "income", date: "2026-10-12", label: "x", amount: 0 });
+    bad({ kind: "income", date: "2026-10-12", label: "x", amount: -5 });
+    bad({ kind: "income", date: "2026-10-12", label: "x", amount: 0.004 });      // rounds to $0.00
+    bad({ kind: "income", date: "2026-10-12", label: "x", amount: 1e307 });      // overflows totals
+    bad({ kind: "income", date: "10/12/2026", label: "x", amount: 5 });
+    bad({ kind: "income", date: "2026-13-01", label: "x", amount: 5 });          // no month 13
+    bad({ kind: "income", date: "2026-02-30", label: "x", amount: 5 });          // no Feb 30
+    bad({ kind: "income", date: "2026-11-05", label: "x", amount: 5, month: "2026-10" }); // outside the viewed month
+    bad({ kind: "expense", date: "2026-10-12", label: "x", amount: 5, categoryId: 999 });
     expect(d.prepare(`SELECT COUNT(*) n FROM transactions`).get()).toEqual({ n: 0 });
+  });
+
+  it("accepts a date inside the viewed month and rounds the amount to cents", () => {
+    const id = addManualTxn(d, { kind: "expense", date: "2026-10-31", label: "x", amount: 12.345, month: "2026-10" });
+    expect(row(d, id).amount).toBe(12.35);
   });
 
   it("surfaces in cashflowView in the right section with no account segment", () => {

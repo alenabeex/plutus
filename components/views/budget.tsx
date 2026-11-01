@@ -1,9 +1,10 @@
 "use client";
 
 // Cash Flow — read-only analytics (spec 2026-07-27). Numbers derive from
-// transactions; the page never writes. Drill-down (expand a row to its
-// transactions) replaces editing: wrong number → fix the transaction's
-// category, not the sheet. Sheet-imported months render from stored JSON
+// transactions; the page never writes the sheet. Drill-down (expand a row to
+// its transactions) replaces editing: wrong number → fix the transaction's
+// category, not the sheet. The only writes are to transactions: edits from
+// a row's ⋯ menu, and manual cash entries from each card's Add. Sheet-imported months render from stored JSON
 // with no drill-down (txns are empty).
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -620,10 +621,18 @@ function AddTxnModal({
   onClose: () => void;
   onAdd: (input: { label: string; amount: number; date: string; categoryId?: number }) => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  // Local calendar date, not toISOString's UTC one — an evening in the US
+  // would otherwise prefill tomorrow (and miss the month on its last day).
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // The entry must land in the month being viewed, or it vanishes into one
+  // the user isn't looking at — the picker is clamped and the server checks.
+  const [y, m] = month.split("-").map(Number);
+  const monthMin = `${month}-01`;
+  const monthMax = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(today.startsWith(month) ? today : `${month}-01`);
+  const [date, setDate] = useState(today.startsWith(`${month}-`) ? today : monthMin);
   const [categoryId, setCategoryId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -634,7 +643,8 @@ function AddTxnModal({
 
   const title = kind === "income" ? "Add cash income" : kind === "expense" ? "Add cash expense" : "Add saving";
   const parsed = Number(amount);
-  const valid = label.trim().length > 0 && Number.isFinite(parsed) && parsed > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const valid = label.trim().length > 0 && Number.isFinite(parsed) && parsed >= 0.01
+    && date >= monthMin && date <= monthMax;
   const submit = () => {
     if (!valid || busy) return;
     onAdd({ label: label.trim(), amount: parsed, date, categoryId: kind === "expense" && categoryId !== null ? categoryId : undefined });
@@ -648,12 +658,16 @@ function AddTxnModal({
         onClick={() => setCategoryId(on ? null : c.id)}>{c.name}</button>
     );
   };
-  const section = (label: string, grp: "need" | "want") => (
-    <div className="mb-3">
-      <div className="text-[11px] mb-1.5" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>{label}</div>
-      <div className="flex flex-wrap gap-1.5">{categories.filter((c) => c.grp === grp).map(chip)}</div>
-    </div>
-  );
+  const section = (label: string, grp: "need" | "want") => {
+    const cats = categories.filter((c) => c.grp === grp);
+    if (cats.length === 0) return null;
+    return (
+      <div className="mb-3">
+        <div className="text-[11px] mb-1.5" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>{label}</div>
+        <div className="flex flex-wrap gap-1.5">{cats.map(chip)}</div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -679,7 +693,7 @@ function AddTxnModal({
           <input type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} placeholder="0.00" aria-label="Amount"
             onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             className="num w-1/2 rounded-lg px-3 py-2 text-sm" style={inputStyle} />
-          <input type="date" value={date} aria-label="Date"
+          <input type="date" value={date} min={monthMin} max={monthMax} aria-label="Date"
             onChange={(e) => setDate(e.target.value)}
             className="w-1/2 rounded-lg px-3 py-2 text-sm" style={inputStyle} />
         </div>
@@ -812,7 +826,7 @@ export default function BudgetView({
   }, [loadMonth]);
 
   // Transaction actions from the drill-down ⋯ popover (spec 2026-07-28): this
-  // is the read-only page's one write path — edit the transaction, never the
+  // is the read-only page's edit path — edit the transaction, never the
   // sheet. Close the popover, call the API, re-fetch so everything recomputes.
   const onTxnAction = useCallback<OnTxnAction>(
     async (id, action, opts) => {
@@ -900,7 +914,7 @@ export default function BudgetView({
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ kind: addKind, ...input }),
+          body: JSON.stringify({ kind: addKind, month, ...input }),
         });
         if (res.status === 401) { onLocked(); return; }
         const resBody = await res.json().catch(() => ({}));
@@ -909,14 +923,17 @@ export default function BudgetView({
           return;
         }
         setAddKind(null);
-        await loadMonth();
       } catch {
         setAddError("Couldn't reach the app server");
+        return;
       } finally {
         setAddBusy(false);
       }
+      // Outside the try: the row is saved by now, and a reload failure must
+      // not surface as an "add" error in a modal that has already closed.
+      await loadMonth();
     },
-    [addKind, onLocked, loadMonth],
+    [addKind, month, onLocked, loadMonth],
   );
 
   // One popover open at a time.
@@ -1033,6 +1050,10 @@ export default function BudgetView({
   const { grade, gradeColor, gradeBg } = gradeFor(data.totalIncome, data.totalWants, data.saved);
   const needsRows = data.expenses.filter((e) => e.grp === "need");
   const wantsRows = data.expenses.filter((e) => e.grp !== "need");
+  // Manual entries only on months that derive from transactions. A stored
+  // (sheet-imported / pre-redesign) month never reads transactions — the row
+  // would either never show or silently replace the stored numbers.
+  const canAdd = data.source === "derived";
 
   return (
     <div>
@@ -1054,8 +1075,10 @@ export default function BudgetView({
       <div className="mb-4 rounded-2xl p-5" style={{ background: CARD, border: `1px solid ${LINE}` }}>
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-lg font-bold" style={{ color: INK }}>Income</h2>
-          <button type="button" style={EDIT_BTN} {...editBtnHover}
-            onClick={() => { setAddError(null); setAddKind("income"); }}>Add</button>
+          {canAdd && (
+            <button type="button" style={EDIT_BTN} {...editBtnHover}
+              onClick={() => { setAddError(null); setAddKind("income"); }}>Add</button>
+          )}
         </div>
         {data.income.length === 0 && (
           <div className="py-3 text-sm" style={{ color: MUTED }}>No income this month.</div>
@@ -1073,8 +1096,10 @@ export default function BudgetView({
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-lg font-bold" style={{ color: INK }}>Expenses</h2>
           <div className="flex gap-2">
-            <button type="button" style={EDIT_BTN} {...editBtnHover}
-              onClick={() => { setAddError(null); setAddKind("expense"); }}>Add</button>
+            {canAdd && (
+              <button type="button" style={EDIT_BTN} {...editBtnHover}
+                onClick={() => { setAddError(null); setAddKind("expense"); }}>Add</button>
+            )}
             <button
               type="button"
               style={EDIT_BTN}
@@ -1146,8 +1171,10 @@ export default function BudgetView({
             )}
           </h2>
           <div className="flex gap-2">
-            <button type="button" style={EDIT_BTN} {...editBtnHover}
-              onClick={() => { setAddError(null); setAddKind("saved"); }}>Add</button>
+            {canAdd && (
+              <button type="button" style={EDIT_BTN} {...editBtnHover}
+                onClick={() => { setAddError(null); setAddKind("saved"); }}>Add</button>
+            )}
             <button
               type="button"
               style={EDIT_BTN}
