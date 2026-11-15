@@ -9,7 +9,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown, ChevronRight, Pencil, X,
-  Banknote, PiggyBank, Flag, Tag, HelpCircle,
+  Banknote, PiggyBank, Flag, Tag, HelpCircle, ArrowLeftRight,
   ShoppingCart, Utensils, Ticket, Wrench, Home, PawPrint, Gift, Fuel,
   Plane, ShoppingBag, GraduationCap, Smartphone, Receipt, Zap, Wifi,
   Shield, HeartPulse, Building2, Bitcoin,
@@ -18,7 +18,7 @@ import {
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { MENU_ITEM, menuItemHover } from "@/lib/styles";
-import { usd, gradeFor } from "@/lib/format";
+import { usd, gradeFor, monthLabel } from "@/lib/format";
 import type { CashflowData, CashflowRow, CashflowTxn } from "@/lib/types";
 
 interface BudgetViewProps {
@@ -73,16 +73,18 @@ function Tile({ label, value, bg, color, sub, subColor }: {
 // Every Cash Flow area a transaction can live in. `area` drives which move
 // targets the popover offers — you can move a txn anywhere but where it
 // already is. Disputed is a real area (the folder at the bottom of
-// Expenses), so a disputed txn can be moved back out the same way.
-export type CashflowArea = "income" | "expense" | "saved" | "disputed";
+// Expenses), so a disputed txn can be moved back out the same way — and so
+// is Transfer, the folder under it (Alena 2026-11-14).
+export type CashflowArea = "income" | "expense" | "saved" | "disputed" | "transfer";
 
 export interface TxnActionOpts {
   categoryId?: number;
   to?: CashflowArea;
+  month?: string; // 'YYYY-MM' — the "month" action's destination
 }
 export type OnTxnAction = (
   id: number,
-  action: "category" | "move",
+  action: "category" | "move" | "month",
   opts?: TxnActionOpts,
 ) => void;
 
@@ -108,7 +110,14 @@ function areaLabel(area: CashflowArea, rowLabel: string): string {
   return area === "income" ? "Income"
     : area === "saved" ? "Savings"
     : area === "disputed" ? "Disputed"
+    : area === "transfer" ? "Transfer"
     : rowLabel;
+}
+
+/** 'YYYY-MM' shifted by whole months. */
+function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
 }
 
 // Actions popover for one transaction — anchored to its own ⋯ button so
@@ -263,6 +272,7 @@ const ICON_RULES: [RegExp, LucideIcon][] = [
 function rowIcon(label: string, area: CashflowArea): LucideIcon {
   if (area === "income") return Banknote;
   if (area === "disputed") return Flag;
+  if (area === "transfer") return ArrowLeftRight;
   const matched = ICON_RULES.find(([re]) => re.test(label))?.[1];
   // saved destinations keyword-match too (Crypto → Bitcoin), piggy bank otherwise
   if (area === "saved") return matched ?? PiggyBank;
@@ -287,8 +297,9 @@ function Row({
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
   // The Disputed folder shows no share bar or % — its amounts are negated,
-  // so a share of expenses would be a lie (spec Alena 2026-07-28).
-  const noBar = area === "disputed";
+  // so a share of expenses would be a lie (spec Alena 2026-07-28). Same for
+  // the Transfer folder: own-account moves are not a share of spending.
+  const noBar = area === "disputed" || area === "transfer";
   // rowIcon returns one of a fixed set of static lucide components, so this
   // is a lookup, not a component created during render — createElement keeps
   // the react-hooks/static-components lint honest about that.
@@ -373,7 +384,10 @@ function Row({
 // Where a single transaction can be re-filed (spec Alena 2026-07-29): its
 // own modal, opened from the row popover's category pill. Destinations are
 // grouped under uppercase micro-labels — Income · Needs · Wants · Savings ·
-// Disputed — the current location's chip is omitted.
+// Other (Transfer) · Disputed — the current location's chip is omitted.
+// Last section moves it across months instead (Alena 2026-11-14): one step
+// back or forward from the month on screen, never into the future.
+// `month` is the viewed month — where the transaction is filed right now.
 export interface PickerTarget {
   id: number;
   area: CashflowArea;
@@ -382,9 +396,10 @@ export interface PickerTarget {
 }
 
 function TxnPickerModal({
-  target, categories, onTxnAction, onClose,
+  target, month, categories, onTxnAction, onClose,
 }: {
   target: PickerTarget;
+  month: string;
   categories: { id: number; name: string; grp: "need" | "want" }[];
   onTxnAction: OnTxnAction;
   onClose: () => void;
@@ -409,6 +424,13 @@ function TxnPickerModal({
   };
   const cats = (grp: "need" | "want") =>
     categories.filter((c) => c.grp === grp && !(isExpense && c.name === target.rowLabel));
+  const pickMonth = (to: string) => {
+    onClose();
+    onTxnAction(target.id, "month", { month: to });
+  };
+  // same UTC month key the server compares against
+  const monthChoices = [shiftMonth(month, -1), shiftMonth(month, 1)]
+    .filter((m) => m <= new Date().toISOString().slice(0, 7));
 
   const section = (label: string, chips: React.ReactNode) => (
     <div className="mb-3">
@@ -445,7 +467,9 @@ function TxnPickerModal({
         {cats("need").length > 0 && section("Needs", cats("need").map((c) => destChip(c.name, () => pickCategory(c))))}
         {cats("want").length > 0 && section("Wants", cats("want").map((c) => destChip(c.name, () => pickCategory(c))))}
         {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
+        {target.area !== "transfer" && section("Other", destChip("Transfer", () => pickArea("transfer")))}
         {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
+        {section("Month", monthChoices.map((m) => destChip(monthLabel(m), () => pickMonth(m))))}
       </div>
     </div>
   );
@@ -834,7 +858,9 @@ export default function BudgetView({
       const body =
         action === "category"
           ? { id, action, categoryId: opts?.categoryId }
-          : { id, action, to: opts?.to, categoryId: opts?.categoryId };
+          : action === "month"
+            ? { id, action, month: opts?.month }
+            : { id, action, to: opts?.to, categoryId: opts?.categoryId };
       const res = await fetch("/api/transactions", {
         method: "PUT",
         credentials: "same-origin",
@@ -1156,6 +1182,18 @@ export default function BudgetView({
                  onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
           </div>
         )}
+        {/* Transfer folder — own-account moves the classifier took for
+            income or spending; visible so they can be moved back, counted
+            in no total (Alena 2026-11-14) */}
+        {data.transfers && (
+          <div className={needsRows.length > 0 || wantsRows.length > 0 || data.disputed ? "mt-4" : "mt-0"}>
+            <Row row={data.transfers} total={data.totalExpenses} valueColor={MUTED} area="transfer"
+                 open={openRow === "t:Transfer"}
+                 onToggle={() => setOpenRow(openRow === "t:Transfer" ? null : "t:Transfer")}
+                 openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+          </div>
+        )}
       </div>
 
       {/* Savings — income that became investments (txn_class='saved'). Not
@@ -1219,6 +1257,7 @@ export default function BudgetView({
         <TxnPickerModal
           key={picker.id}
           target={picker}
+          month={data.month}
           categories={data.categories}
           onTxnAction={onTxnAction}
           onClose={() => setPicker(null)}

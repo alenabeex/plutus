@@ -12,7 +12,7 @@ function makeDb(): Database.Database {
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, date TEXT, name TEXT, merchant TEXT,
       amount REAL, category_id INTEGER, pending INTEGER DEFAULT 0,
-      txn_class TEXT
+      txn_class TEXT, cashflow_month TEXT
     );
     CREATE TABLE budget_months (month TEXT PRIMARY KEY);
     -- cashflowView LEFT JOINs accounts for the drill-down source-account
@@ -33,13 +33,13 @@ function makeDb(): Database.Database {
 
 function txn(d: Database.Database, t: {
   date: string; name: string; merchant?: string; amount: number;
-  category_id?: number; pending?: number; txn_class?: string;
+  category_id?: number; pending?: number; txn_class?: string; cashflow_month?: string;
 }) {
   d.prepare(
-    `INSERT INTO transactions (date, name, merchant, amount, category_id, pending, txn_class)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO transactions (date, name, merchant, amount, category_id, pending, txn_class, cashflow_month)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(t.date, t.name, t.merchant ?? null, t.amount, t.category_id ?? null,
-        t.pending ?? 0, t.txn_class ?? "expense");
+        t.pending ?? 0, t.txn_class ?? "expense", t.cashflow_month ?? null);
 }
 
 describe("cashflowView", () => {
@@ -114,6 +114,36 @@ describe("cashflowView", () => {
     expect(v.txnCount).toBe(0);
     expect(v.expenses).toEqual([]);
     expect(v.totalExpenses).toBe(0);
+  });
+
+  // Manual Transfer destination (Alena 2026-11-14): own-account moves the
+  // classifier got wrong. One visible folder, in no total — and stored as
+  // 'transfer_manual', never the machine's 'transfer'.
+  it("collects manual transfers into one folder that counts in no total", () => {
+    txn(d, { date: "2026-07-03", name: "ZELLE FROM SELF", amount: -200, txn_class: "transfer_manual" });
+    txn(d, { date: "2026-07-09", name: "MOVE TO JOINT", amount: 75, category_id: 3, txn_class: "transfer_manual" });
+    const v = cashflowView("2026-07", d);
+    expect(v.transfers?.label).toBe("Transfer");
+    expect(v.transfers?.value).toBe(275);
+    expect(v.transfers?.txns.map((t) => t.value)).toEqual([75, 200]);
+    expect(v.totalIncome).toBe(0);
+    expect(v.totalExpenses).toBe(0);
+    expect(v.txnCount).toBe(0);
+  });
+
+  it("leaves machine-classified transfers out entirely", () => {
+    txn(d, { date: "2026-07-03", name: "CARD PAYMENT", amount: 500, txn_class: "transfer" });
+    expect(cashflowView("2026-07", d).transfers).toBeNull();
+  });
+
+  // Month override (Alena 2026-11-14): cashflow_month files a transaction
+  // under a different month than its posting date.
+  it("files a transaction under its cashflow_month, not its date", () => {
+    txn(d, { date: "2026-07-31", name: "EARLY PAYCHECK", amount: -3000, txn_class: "income", cashflow_month: "2026-08" });
+    expect(cashflowView("2026-07", d).txnCount).toBe(0);
+    const aug = cashflowView("2026-08", d);
+    expect(aug.totalIncome).toBe(3000);
+    expect(aug.income[0].txns[0].date).toBe("2026-07-31");
   });
 });
 

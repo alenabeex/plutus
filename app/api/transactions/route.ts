@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { addManualTxn, ManualTxnError, type ManualTxnInput } from "@/lib/add-manual-txn";
+import { moveTxnMonth, MoveMonthError } from "@/lib/move-txn-month";
 import { isValidMonthKey } from "@/lib/format";
 
 export const runtime = "nodejs";
@@ -22,14 +23,20 @@ export const runtime = "nodejs";
 //    and new ones are one population). Moving to expense takes an optional
 //    categoryId so the txn lands in a real category instead of
 //    Uncategorized. classifyTransactions only fills NULL txn_class rows,
-//    so a manual move sticks across syncs.
+//    so a manual move sticks across syncs. "transfer" (2026-11-14) is the
+//    Transfer folder under Disputed — own-account money the classifier
+//    took for income or spending; stored as 'transfer_manual', never the
+//    classifier's 'transfer', whose legacy upgrade passes would re-decide it.
+//  - "month": file the transaction under a different Cash Flow month than
+//    its date (lib/move-txn-month — the tested seam). The date is untouched.
 //  - "rename": override the transaction's display label. Writes `merchant`
 //    (the display COALESCE prefers it), so future rule-learning keys on the
 //    name the user actually recognizes.
 type Body =
   | { id: number; action: "category"; categoryId: number }
   | { id: number; action: "dispute" }
-  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed"; categoryId?: number }
+  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed" | "transfer"; categoryId?: number }
+  | { id: number; action: "month"; month: string }
   | { id: number; action: "rename"; label: string };
 
 export const PUT = withJsonErrors(async (req: NextRequest) => {
@@ -83,12 +90,15 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
 
   if (body.action === "move") {
     const to = (body as { to?: string }).to;
-    if (to !== "income" && to !== "saved" && to !== "expense" && to !== "disputed") {
+    if (to !== "income" && to !== "saved" && to !== "expense" && to !== "disputed" && to !== "transfer") {
       return NextResponse.json({ ok: false, error: "bad destination" }, { status: 400 });
     }
     if (to === "disputed") {
       // keep category_id — un-disputing back to expense restores it
       d.prepare(`UPDATE transactions SET txn_class = 'excluded' WHERE id = ?`).run(body.id);
+    } else if (to === "transfer") {
+      // same as disputed: keep category_id so moving back to expense restores it
+      d.prepare(`UPDATE transactions SET txn_class = 'transfer_manual' WHERE id = ?`).run(body.id);
     } else if (to === "expense") {
       const categoryId = (body as { categoryId?: number }).categoryId;
       if (typeof categoryId === "number") {
@@ -105,6 +115,18 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       // income/saved don't use categories — clear any stale one
       d.prepare(`UPDATE transactions SET txn_class = ?, category_id = NULL WHERE id = ?`)
         .run(to, body.id);
+    }
+    return withRefreshedSession(req, { ok: true });
+  }
+
+  if (body.action === "month") {
+    try {
+      moveTxnMonth(d, body.id, (body as { month?: unknown }).month);
+    } catch (e) {
+      if (e instanceof MoveMonthError) {
+        return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+      }
+      throw e;
     }
     return withRefreshedSession(req, { ok: true });
   }

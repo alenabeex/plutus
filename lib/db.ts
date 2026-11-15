@@ -129,6 +129,8 @@ function migrate(d: Database.Database) {
 
   // v4: Cash Flow derivation contract (plan §Phase 4 revision 2026-07-25).
   // - transactions.txn_class: 'income' | 'expense' | 'transfer' | NULL
+  //   (later: 'saved', 'excluded' = Disputed, 'transfer_manual' = the user's
+  //   own Transfer folder — distinct from the classifier's 'transfer')
   //   (NULL = not yet classified; the classify pass in lib/derive fills it).
   // - transactions.pfc: Plaid personal_finance_category primary, captured at
   //   sync — the strongest transfer/income signal when present.
@@ -140,6 +142,10 @@ function migrate(d: Database.Database) {
   );
   if (!txnCols.has("txn_class")) d.exec(`ALTER TABLE transactions ADD COLUMN txn_class TEXT`);
   if (!txnCols.has("pfc")) d.exec(`ALTER TABLE transactions ADD COLUMN pfc TEXT`);
+  // Month override (2026-11-14): 'YYYY-MM' when the user filed a transaction
+  // under a different Cash Flow month than its date; NULL = month of date.
+  // Read through TXN_MONTH_SQL (lib/derive), written by lib/move-txn-month.
+  if (!txnCols.has("cashflow_month")) d.exec(`ALTER TABLE transactions ADD COLUMN cashflow_month TEXT`);
   const catCols = new Set(
     (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
   );

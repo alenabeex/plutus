@@ -158,7 +158,8 @@ export function classifyTransactions(d: Database.Database = db()): number {
 
   // One-time upgrade for rows classed before 'saved' existed: machine-made
   // 'transfer' rows that match the saved fingerprints become 'saved'. Safe
-  // because manual moves write income/saved/expense — never 'transfer' — so
+  // because manual moves write income/saved/expense/transfer_manual — never
+  // 'transfer' — so
   // this can only ever touch auto-classified rows. Idempotent: after the
   // flip, the row no longer matches txn_class='transfer'.
   const legacy = d.prepare(
@@ -357,6 +358,14 @@ export function categorizeTransactions(d: Database.Database = db()): number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** The Cash Flow month a transaction is filed under: its cashflow_month
+ *  override when the user moved it (lib/move-txn-month), else the month of
+ *  its date. Every month-scoped Cash Flow query goes through this — never a
+ *  raw `date LIKE` — so a moved transaction leaves one month and lands in
+ *  the other everywhere at once. Unqualified column names: usable in a
+ *  single-table query as is; joined queries spell it out with their alias. */
+export const TXN_MONTH_SQL = `COALESCE(cashflow_month, substr(date, 1, 7))`;
+
 /** Months materialize from transaction dates (plan T4.4), but ONLY the
  *  current month auto-materializes (spec 2026-07-28). Deep backfill (730-day
  *  history at link time) would otherwise dump ~24 months of never-reviewed
@@ -369,7 +378,7 @@ export function ensureMonthsFromTransactions(
   nowMonth: string = new Date().toISOString().slice(0, 7),
 ): void {
   const months = d.prepare(
-    `SELECT DISTINCT substr(date, 1, 7) m FROM transactions WHERE pending = 0 AND date IS NOT NULL`,
+    `SELECT DISTINCT ${TXN_MONTH_SQL} m FROM transactions WHERE pending = 0 AND date IS NOT NULL`,
   ).all() as { m: string }[];
   const ins = d.prepare(`INSERT OR IGNORE INTO budget_months (month) VALUES (?)`);
   for (const { m } of months) if (/^\d{4}-\d{2}$/.test(m) && m >= nowMonth) ins.run(m);
@@ -444,6 +453,7 @@ export interface DerivedCashflowView {
   savedRows: CashflowRow[];  // txn_class='saved' — income that became investments
   totalSaved: number;
   disputed: CashflowRow | null; // txn_class='excluded', one folder — visible, never counted
+  transfers: CashflowRow | null; // txn_class='transfer_manual', one folder — visible, never counted
   txnCount: number;
 }
 
@@ -451,7 +461,8 @@ export interface DerivedCashflowView {
  *  CATEGORY (merchants live inside each row's txns), income grouped by payer,
  *  needs/wants totals split by categories.grp for the allocation bar.
  *  Plaid sign convention: positive = money out; display values are positive
- *  on both sides. Transfers/pending are excluded via txn_class/pending. */
+ *  on both sides. Machine-classified transfers and pending rows never reach
+ *  this query; the month is the filed month (TXN_MONTH_SQL), not the date. */
 export function cashflowView(month: string, d: Database.Database = db()): DerivedCashflowView {
   const rows = d.prepare(
     `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
@@ -460,11 +471,12 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      LEFT JOIN accounts a ON a.id = t.account_id
-     WHERE t.pending = 0 AND t.date LIKE ? AND t.txn_class IN ('income', 'expense', 'saved', 'excluded')
+     WHERE t.pending = 0 AND COALESCE(t.cashflow_month, substr(t.date, 1, 7)) = ?
+       AND t.txn_class IN ('income', 'expense', 'saved', 'excluded', 'transfer_manual')
      ORDER BY t.date DESC, t.id DESC`,
-  ).all(`${month}%`) as {
+  ).all(month) as {
     id: number; date: string; label: string; amount: number;
-    txn_class: "income" | "expense" | "saved" | "excluded"; cat: string | null; grp: string | null;
+    txn_class: "income" | "expense" | "saved" | "excluded" | "transfer_manual"; cat: string | null; grp: string | null;
     acct: string | null; mask: string | null;
   }[];
 
@@ -475,6 +487,13 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   // Expenses so negated charges stay auditable, but never in any total.
   const disputedTxns: CashflowRow["txns"] = [];
   let disputedTotal = 0;
+  // Manual transfers (Alena 2026-11-14) get the same treatment: one folder
+  // under Disputed, in no total. Stored as 'transfer_manual' — NOT the
+  // classifier's 'transfer' — so classifyTransactions' legacy upgrade passes,
+  // which re-decide 'transfer' rows by fingerprint, can never undo the user.
+  // Money moved between own accounts has no direction: absolute dollars.
+  const transferTxns: CashflowRow["txns"] = [];
+  let transferTotal = 0;
   let totalNeeds = 0;
 
   for (const r of rows) {
@@ -484,6 +503,12 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
     if (r.txn_class === "excluded") {
       disputedTxns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount), account });
       disputedTotal = round2(disputedTotal + r.amount);
+      continue;
+    }
+    if (r.txn_class === "transfer_manual") {
+      const v = round2(Math.abs(r.amount));
+      transferTxns.push({ id: r.id, date: r.date, label: r.label, value: v, account });
+      transferTotal = round2(transferTotal + v);
       continue;
     }
     if (r.txn_class === "income") {
@@ -524,9 +549,12 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
     disputed: disputedTxns.length > 0
       ? { label: "Disputed", value: disputedTotal, txns: disputedTxns }
       : null,
-    // active classes only — disputed must not make an otherwise-empty month
-    // look like it has cash flow
-    txnCount: rows.length - disputedTxns.length,
+    transfers: transferTxns.length > 0
+      ? { label: "Transfer", value: transferTotal, txns: transferTxns }
+      : null,
+    // active classes only — disputed/transfers must not make an otherwise-
+    // empty month look like it has cash flow
+    txnCount: rows.length - disputedTxns.length - transferTxns.length,
   };
 }
 

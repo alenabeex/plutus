@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { monthLabel, isValidMonthKey } from "@/lib/format";
-import { cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions } from "@/lib/derive";
+import { cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions, TXN_MONTH_SQL } from "@/lib/derive";
 import type { CashflowData, CashflowRow } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ const currentMonth = () => new Date().toISOString().slice(0, 7);
  *  but the nav still needs to know history goes back that far. */
 function txnMonthMin(d: ReturnType<typeof db>): string | null {
   const row = d.prepare(
-    `SELECT MIN(substr(date,1,7)) m FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense')`,
+    `SELECT MIN(${TXN_MONTH_SQL}) m FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense')`,
   ).get() as { m: string | null };
   return row?.m ?? null;
 }
@@ -55,7 +55,7 @@ function buildCashflowData(month: string): CashflowData {
         totalNeeds: v.totalNeeds, totalWants: v.totalWants,
         saved: round2(v.totalIncome - v.totalExpenses),
         savedRows: v.savedRows, totalSaved: v.totalSaved,
-        disputed: v.disputed,
+        disputed: v.disputed, transfers: v.transfers,
       };
     }
   }
@@ -80,7 +80,7 @@ function buildCashflowData(month: string): CashflowData {
     totalNeeds: row.total_fixed, totalWants: row.total_variable,
     saved: round2(row.total_income - totalExpenses),
     // sheet months predate transaction data — nothing to itemize
-    savedRows: [], totalSaved: 0, disputed: null,
+    savedRows: [], totalSaved: 0, disputed: null, transfers: null,
   };
 }
 
@@ -127,8 +127,8 @@ export const GET = withJsonErrors(async (req: NextRequest) => {
     ).map((r) => r.month);
     const gatedTxnCount = (
       dd.prepare(
-        `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND date LIKE ?`,
-      ).get(`${month}%`) as { n: number }
+        `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND ${TXN_MONTH_SQL} = ?`,
+      ).get(month) as { n: number }
     ).n;
     return NextResponse.json(
       { error: "month-not-found", month, months, txnMonthMin: txnMonthMin(dd), gatedTxnCount },
@@ -160,8 +160,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   const d = db();
   const settled = (
     d.prepare(
-      `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND date LIKE ?`,
-    ).get(`${month}%`) as { n: number }
+      `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND ${TXN_MONTH_SQL} = ?`,
+    ).get(month) as { n: number }
   ).n;
   if (settled < 1) {
     return NextResponse.json({ ok: false, error: "no-transactions" }, { status: 400 });
