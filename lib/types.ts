@@ -50,11 +50,17 @@ export interface CashflowTxn {
   bankDate?: string; // set only when the user re-dated the row: the bank's own date
 }
 
+/** Expense grouping in Cash Flow. Needs = recurring obligations, Wants =
+ *  discretionary, Business = costs of running the user's business — its own
+ *  section (Alena 2026-11-14), counted in Expenses but in neither the Needs
+ *  nor the Wants total, so it never moves the savings grade. */
+export type CategoryGroup = "need" | "want" | "business";
+
 export interface CashflowRow {
   label: string;          // category (expenses) or payer (income)
   value: number;
   txns: CashflowTxn[];    // empty for stored/sheet months → no drill-down
-  grp?: "need" | "want";  // expense rows only — income rows omit this key
+  grp?: CategoryGroup;    // expense rows only — income rows omit this key
 }
 
 export interface CashflowData {
@@ -67,12 +73,13 @@ export interface CashflowData {
   expenses: CashflowRow[]; // flat, ranked by value desc
   totalExpenses: number;
   totalNeeds: number;      // for the allocation bar
-  totalWants: number;
+  totalWants: number;      // totalExpenses − totalNeeds − totalBusiness
+  totalBusiness: number;
   saved: number;           // totalIncome − totalExpenses
   savedRows: CashflowRow[]; // txn_class='saved' — income that became investments
   totalSaved: number;       // sum of savedRows (≠ `saved`, the leftover)
   disputed: CashflowRow | null; // txn_class='excluded' — the Disputed folder at the bottom of Expenses
   transfers: CashflowRow | null; // txn_class 'transfer_manual' + benched 'transfer' — the Transfer folder under Disputed
-  categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
+  categories: { id: number; name: string; grp: CategoryGroup }[]; // drill-down recategorize chips
   txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }

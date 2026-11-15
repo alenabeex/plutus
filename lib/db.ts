@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { dbKey } from "./keychain";
-import { DEMO_SEED, DEFAULT_CATEGORIES, NEED_CATEGORIES, type SeedConfig } from "./seed-config";
+import { DEMO_SEED, DEFAULT_CATEGORIES, NEED_CATEGORIES, BUSINESS_CATEGORIES, type SeedConfig } from "./seed-config";
 import { gradeFor } from "./format";
 import { seedDefaultCategories } from "./category-ops";
 
@@ -135,7 +135,8 @@ function migrate(d: Database.Database) {
   //   (NULL = not yet classified; the classify pass in lib/derive fills it).
   // - transactions.pfc: Plaid personal_finance_category primary, captured at
   //   sync — the strongest transfer/income signal when present.
-  // - categories.grp: 'need' | 'want' — Needs vs Wants split in Cash Flow.
+  // - categories.grp: 'need' | 'want' (| 'business' since 2026-11-14) —
+  //   the Cash Flow expense sections.
   // - accounts.cashflow_role: NULL = auto by kind; manual override later
   //   ('income' | 'spending' | 'both' | 'exclude').
   const txnCols = new Set(
@@ -156,6 +157,11 @@ function migrate(d: Database.Database) {
             WHERE cashflow_month IS NOT NULL AND date_override IS NULL`);
     d.exec(`ALTER TABLE transactions DROP COLUMN cashflow_month`);
   }
+  // no_auto_category (2026-11-14): 1 when the user filed a transaction under
+  // Uncategorized on purpose — the rule engine and the AI pass skip it, or
+  // the next derive would put it straight back. Cleared when it gets a
+  // category again. Written by lib/category-ops (uncategorizeTxn).
+  if (!txnCols.has("no_auto_category")) d.exec(`ALTER TABLE transactions ADD COLUMN no_auto_category INTEGER DEFAULT 0`);
   const catCols = new Set(
     (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
   );
@@ -174,7 +180,7 @@ function migrate(d: Database.Database) {
   // fresh ones) converge on the default category set + need/want grouping.
   // Each default is offered once per database (lib/category-ops): the
   // user's own adds, renames and deletes are never undone by a restart.
-  seedDefaultCategories(d, DEFAULT_CATEGORIES, NEED_CATEGORIES);
+  seedDefaultCategories(d, DEFAULT_CATEGORIES, NEED_CATEGORIES, BUSINESS_CATEGORIES);
 
   // Heal both halves of a half-finished removal. The old connections DELETE
   // handler ran outside a transaction, so when its item delete hit the

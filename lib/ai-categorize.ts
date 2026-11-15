@@ -40,6 +40,7 @@ function unknownMerchants(d: Database.Database): string[] {
       `SELECT DISTINCT COALESCE(NULLIF(TRIM(merchant), ''), name) who
        FROM transactions
        WHERE category_id IS NULL AND txn_class = 'expense' AND pending = 0
+         AND COALESCE(no_auto_category, 0) = 0
        ORDER BY who LIMIT ?`,
     ).all(BATCH_LIMIT) as { who: string | null }[]
   )
@@ -66,7 +67,7 @@ export async function aiCategorize(d: Database.Database = db()): Promise<AiCateg
     system:
       "You categorize personal-finance merchant strings into spending categories. " +
       "Categories marked grp=need are recurring obligations (housing, utilities, insurance, subscriptions); " +
-      "grp=want is discretionary. Assign each merchant the single best-fitting category from the list. " +
+      "grp=want is discretionary; grp=business is a cost of running the user's own business. Assign each merchant the single best-fitting category from the list. " +
       "If a merchant is genuinely unrecognizable, omit it rather than guessing.",
     output_config: {
       format: {

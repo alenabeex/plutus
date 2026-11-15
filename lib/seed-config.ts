@@ -54,20 +54,22 @@ export interface SeedConfig {
 // user has linked anything. Split into two groups (Cash Flow contract):
 //   need — recurring obligations: housing, utilities, insurance, subscriptions
 //   want — discretionary: everything else, AI/rules-categorized
+// plus a third group, business (below).
 export const NEED_CATEGORIES = [
   "Rent / Housing", "Utilities", "Phone / Internet", "Insurance",
   "Medical / Health", "Apps / Subs",
-  // Business costs are obligations, not discretionary — one flat bucket, no
-  // sub-categories (Alena 2026-10-30). Business income has no category: income
-  // rows group by payer.
-  "Business Expense",
 ];
+// Business costs get their own section beside Needs and Wants (Alena
+// 2026-11-14; a Needs category from 2026-10-30 until then). One flat bucket
+// to start — the user adds more from the categories modal. Business income
+// has no category: income rows group by payer.
+export const BUSINESS_CATEGORIES = ["Business Expense"];
 export const WANT_CATEGORIES = [
   "Groceries", "Eat Out", "Events / Ent.", "Car Mainten.", "Misc. / Maint / Home",
   "Pets", "Gifts", "Car Gas", "Travel / Parking", "Shopping / Personal",
   "Education / Training", "Interest Fees / Violations",
 ];
-export const DEFAULT_CATEGORIES = [...NEED_CATEGORIES, ...WANT_CATEGORIES];
+export const DEFAULT_CATEGORIES = [...NEED_CATEGORIES, ...WANT_CATEGORIES, ...BUSINESS_CATEGORIES];
 
 // Grade computation lives in lib/format.ts (gradeFor) — single source.
 
