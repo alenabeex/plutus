@@ -5,6 +5,7 @@ import path from "node:path";
 import { dbKey } from "./keychain";
 import { DEMO_SEED, DEFAULT_CATEGORIES, NEED_CATEGORIES, type SeedConfig } from "./seed-config";
 import { gradeFor } from "./format";
+import { seedDefaultCategories } from "./category-ops";
 
 // Data NEVER lives in the vault/git — ~/FinanceTracker/ only (plan §Decisions).
 // FT_DEMO=1 → separate demo.db seeded with fake data; AI agents develop and
@@ -170,17 +171,10 @@ function migrate(d: Database.Database) {
   if (!manCols.has("icon")) d.exec(`ALTER TABLE manual_assets ADD COLUMN icon TEXT`);
 
   // Cash Flow taxonomy upkeep — runs every start so pre-v4 databases (and
-  // fresh ones) converge on the same category set + need/want grouping.
-  // INSERT OR IGNORE: user-added categories and existing rows are untouched;
-  // only grp is normalized for the known names.
-  const insCat = d.prepare(`INSERT OR IGNORE INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
-  const setGrp = d.prepare(`UPDATE categories SET grp = ? WHERE name = ?`);
-  DEFAULT_CATEGORIES.forEach((name, i) => {
-    const grp = (NEED_CATEGORIES as readonly string[]).includes(name) ? "need" : "want";
-    insCat.run(name, i, grp);
-    setGrp.run(grp, name);
-  });
-  d.prepare(`UPDATE categories SET grp = 'want' WHERE grp IS NULL`).run();
+  // fresh ones) converge on the default category set + need/want grouping.
+  // Each default is offered once per database (lib/category-ops): the
+  // user's own adds, renames and deletes are never undone by a restart.
+  seedDefaultCategories(d, DEFAULT_CATEGORIES, NEED_CATEGORIES);
 
   // Heal both halves of a half-finished removal. The old connections DELETE
   // handler ran outside a transaction, so when its item delete hit the
