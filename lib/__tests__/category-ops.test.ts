@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import {
-  addCategory, renameCategory, deleteCategory, seedDefaultCategories, CategoryError,
+  addCategory, renameCategory, deleteCategory, seedDefaultCategories, uncategorizeTxn, CategoryError,
 } from "../category-ops";
 import { categorizeTransactions, cashflowView } from "../derive";
 
@@ -24,7 +24,7 @@ function makeDb(): Database.Database {
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, date TEXT, name TEXT, merchant TEXT,
       amount REAL, category_id INTEGER, pending INTEGER DEFAULT 0,
-      txn_class TEXT, date_override TEXT
+      txn_class TEXT, date_override TEXT, no_auto_category INTEGER DEFAULT 0
     );
   `);
   seedDefaultCategories(d, DEFAULTS, NEEDS);
@@ -75,6 +75,23 @@ describe("seedDefaultCategories", () => {
     expect(grpOf(d, "Therapy")).toBe("need");
   });
 
+  // Business became its own section on 2026-11-14; before that the default
+  // "Business Expense" was seeded under Needs.
+  it("seeds a business default in the Business group", () => {
+    seedDefaultCategories(d, [...DEFAULTS, "Business Expense"], NEEDS, ["Business Expense"]);
+    expect(grpOf(d, "Business Expense")).toBe("business");
+  });
+
+  it("moves an already-seeded Needs default to Business once, then respects the user", () => {
+    seedDefaultCategories(d, [...DEFAULTS, "Business Expense"], [...NEEDS, "Business Expense"]);
+    expect(grpOf(d, "Business Expense")).toBe("need");
+    seedDefaultCategories(d, [...DEFAULTS, "Business Expense"], NEEDS, ["Business Expense"]);
+    expect(grpOf(d, "Business Expense")).toBe("business");
+    d.prepare(`UPDATE categories SET grp = 'need' WHERE name = 'Business Expense'`).run();
+    seedDefaultCategories(d, [...DEFAULTS, "Business Expense"], NEEDS, ["Business Expense"]);
+    expect(grpOf(d, "Business Expense")).toBe("need");
+  });
+
   // A database from before this record existed: one pass adopts what is
   // there without duplicating, and deletions stick from then on.
   it("adopts a pre-existing database once, then leaves it alone", () => {
@@ -102,6 +119,8 @@ describe("addCategory", () => {
     expect(() => addCategory(d, { name: "  ", grp: "want" })).toThrow(CategoryError);
     expect(() => addCategory(d, { name: "x".repeat(41), grp: "want" })).toThrow(CategoryError);
     expect(() => addCategory(d, { name: "Coffee", grp: "luxury" })).toThrow(CategoryError);
+    expect(addCategory(d, { name: "Software", grp: "business" })).toBeGreaterThan(0);
+    deleteCategory(d, idOf(d, "Software"));
     expect(() => addCategory(d, { name: "insurance", grp: "need" })).toThrow(/already exists/);
     expect(() => addCategory(d, { name: "Uncategorized", grp: "want" })).toThrow(CategoryError);
     expect(() => addCategory(d, { name: "Transfer", grp: "want" })).toThrow(CategoryError);
@@ -153,5 +172,54 @@ describe("deleteCategory", () => {
 
   it("rejects an unknown id", () => {
     expect(() => deleteCategory(d, 999)).toThrow(CategoryError);
+  });
+});
+
+// Business is its own Cash Flow section: counted in Expenses, in neither the
+// Needs nor the Wants total.
+describe("business group in cashflowView", () => {
+  it("totals business apart from needs and wants", () => {
+    const d = makeDb();
+    const biz = addCategory(d, { name: "Software", grp: "business" });
+    const ins = d.prepare(`INSERT INTO transactions (date, name, amount, category_id, txn_class) VALUES (?, ?, ?, ?, 'expense')`);
+    ins.run("2026-07-02", "RENT", 1000, idOf(d, "Rent / Housing"));
+    ins.run("2026-07-03", "SAFEWAY", 80, idOf(d, "Groceries"));
+    ins.run("2026-07-04", "FIGMA", 15, biz);
+    const v = cashflowView("2026-07", d);
+    expect(v.totalExpenses).toBe(1095);
+    expect(v.totalNeeds).toBe(1000);
+    expect(v.totalBusiness).toBe(15);
+    expect(v.totalWants).toBe(80);
+    expect(v.expenses.find((e) => e.label === "Software")?.grp).toBe("business");
+  });
+});
+
+describe("uncategorizeTxn", () => {
+  let d: Database.Database;
+  beforeEach(() => { d = makeDb(); });
+
+  it("files the transaction under Uncategorized and the rule engine leaves it there", () => {
+    const groceries = idOf(d, "Groceries");
+    d.prepare(`INSERT INTO category_rules (pattern, category_id) VALUES ('safeway', ?)`).run(groceries);
+    d.prepare(`INSERT INTO transactions (id, date, name, merchant, amount, category_id, txn_class) VALUES (1, '2026-07-03', 'SAFEWAY', 'Safeway', 80, ?, 'expense')`).run(groceries);
+    d.prepare(`INSERT INTO transactions (id, date, name, merchant, amount, txn_class) VALUES (2, '2026-07-05', 'SAFEWAY', 'Safeway', 20, 'expense')`).run();
+
+    uncategorizeTxn(d, 1);
+    categorizeTransactions(d);
+
+    const v = cashflowView("2026-07", d);
+    // txn 1 stays Uncategorized; txn 2, never touched by the user, still gets its rule
+    expect(v.expenses.map((e) => [e.label, e.value])).toEqual([["Uncategorized", 80], ["Groceries", 20]]);
+    expect(v.totalExpenses).toBe(100);
+  });
+
+  it("turns an income row into an uncategorized expense", () => {
+    d.prepare(`INSERT INTO transactions (id, date, name, amount, txn_class) VALUES (1, '2026-07-03', 'REFUND?', 40, 'income')`).run();
+    uncategorizeTxn(d, 1);
+    expect(cashflowView("2026-07", d).expenses.map((e) => e.label)).toEqual(["Uncategorized"]);
+  });
+
+  it("rejects an unknown transaction", () => {
+    expect(() => uncategorizeTxn(d, 99)).toThrow(CategoryError);
   });
 });

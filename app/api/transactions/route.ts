@@ -3,6 +3,7 @@ import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/aut
 import { db } from "@/lib/db";
 import { addManualTxn, ManualTxnError, type ManualTxnInput } from "@/lib/add-manual-txn";
 import { setTxnDate, TxnDateError } from "@/lib/set-txn-date";
+import { uncategorizeTxn } from "@/lib/category-ops";
 import { isValidMonthKey } from "@/lib/format";
 
 export const runtime = "nodejs";
@@ -36,7 +37,7 @@ export const runtime = "nodejs";
 type Body =
   | { id: number; action: "category"; categoryId: number }
   | { id: number; action: "dispute" }
-  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed" | "transfer"; categoryId?: number }
+  | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed" | "transfer"; categoryId?: number | null }
   | { id: number; action: "date"; date: string }
   | { id: number; action: "rename"; label: string };
 
@@ -66,7 +67,7 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       return NextResponse.json({ ok: false, error: "category not found" }, { status: 400 });
     }
 
-    d.prepare(`UPDATE transactions SET category_id = ? WHERE id = ?`).run(categoryId, body.id);
+    d.prepare(`UPDATE transactions SET category_id = ?, no_auto_category = 0 WHERE id = ?`).run(categoryId, body.id);
 
     // Rule-learning: only merchants (a name-only txn has nothing stable to
     // pattern-match on). Update an existing exact-pattern rule rather than
@@ -103,13 +104,17 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       // same as disputed: category_id is left as it was
       d.prepare(`UPDATE transactions SET txn_class = 'transfer_manual' WHERE id = ?`).run(body.id);
     } else if (to === "expense") {
-      const categoryId = (body as { categoryId?: number }).categoryId;
-      if (typeof categoryId === "number") {
+      const categoryId = (body as { categoryId?: number | null }).categoryId;
+      if (categoryId === null) {
+        // explicit null = the picker's Uncategorized chip: file it there on
+        // purpose and keep the rule engine from putting it back
+        uncategorizeTxn(d, body.id);
+      } else if (typeof categoryId === "number") {
         const category = d.prepare(`SELECT id FROM categories WHERE id = ?`).get(categoryId);
         if (!category) {
           return NextResponse.json({ ok: false, error: "category not found" }, { status: 400 });
         }
-        d.prepare(`UPDATE transactions SET txn_class = 'expense', category_id = ? WHERE id = ?`)
+        d.prepare(`UPDATE transactions SET txn_class = 'expense', category_id = ?, no_auto_category = 0 WHERE id = ?`)
           .run(categoryId, body.id);
       } else {
         d.prepare(`UPDATE transactions SET txn_class = 'expense' WHERE id = ?`).run(body.id);

@@ -19,7 +19,7 @@ import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { MENU_ITEM, menuItemHover } from "@/lib/styles";
 import { usd, gradeFor, monthLabel } from "@/lib/format";
-import type { CashflowData, CashflowRow, CashflowTxn } from "@/lib/types";
+import type { CashflowData, CashflowRow, CashflowTxn, CategoryGroup } from "@/lib/types";
 
 interface BudgetViewProps {
   month: string;
@@ -78,7 +78,7 @@ function Tile({ label, value, bg, color, sub, subColor }: {
 export type CashflowArea = "income" | "expense" | "saved" | "disputed" | "transfer";
 
 export interface TxnActionOpts {
-  categoryId?: number;
+  categoryId?: number | null; // null = file under Uncategorized on purpose
   to?: CashflowArea;
 }
 export type OnTxnAction = (
@@ -87,8 +87,24 @@ export type OnTxnAction = (
   opts?: TxnActionOpts,
 ) => void;
 
-// Destination chip — shared by the picker modal's sections.
-function destChip(label: string, onClick: () => void, color?: string) {
+// Destination chip — shared by the picker modal's sections. `current` marks
+// where the transaction already is: shown filled and not clickable, never
+// left out — a missing chip read as a missing category (Alena 2026-11-14:
+// "Insurance is in Edit Categories but not in the picker").
+function destChip(label: string, onClick: () => void, color?: string, current = false) {
+  if (current) {
+    return (
+      <span
+        key={label}
+        aria-current="true"
+        title="This transaction is already here"
+        className="rounded-full px-2.5 py-1 text-xs font-semibold"
+        style={{ border: `1px solid ${INK}`, background: INK, color: CARD, cursor: "default" }}
+      >
+        {label}
+      </span>
+    );
+  }
   return (
     <button
       key={label}
@@ -129,7 +145,8 @@ function localMonthEnd(): string {
 // row instead of one for the whole view). Three rows: Rename · Category ·
 // Month (Alena 2026-11-14). Rename swaps the rows for an input; Category
 // opens the TxnPickerModal — destinations live in their own modal, grouped
-// Income / Needs / Wants / Savings / Other / Disputed, not inline here;
+// Income / Needs / Wants / Business / Savings / Other / Disputed, not inline
+// here;
 // Month swaps the rows for a date editor — the transaction counts as an
 // entry for whatever month that date falls in.
 function TxnRow({
@@ -455,8 +472,9 @@ function Row({
 
 // Where a single transaction can be re-filed (spec Alena 2026-07-29): its
 // own modal, opened from the row popover's category pill. Destinations are
-// grouped under uppercase micro-labels — Income · Needs · Wants · Savings ·
-// Other (Transfer) · Disputed — the current location's chip is omitted.
+// grouped under uppercase micro-labels — Income · Needs · Wants · Business ·
+// Savings · Other (Uncategorized, Transfer) · Disputed. The category the
+// transaction is already in stays in the list, marked as current.
 export interface PickerTarget {
   id: number;
   area: CashflowArea;
@@ -468,7 +486,7 @@ function TxnPickerModal({
   target, categories, onTxnAction, onClose,
 }: {
   target: PickerTarget;
-  categories: { id: number; name: string; grp: "need" | "want" }[];
+  categories: { id: number; name: string; grp: CategoryGroup }[];
   onTxnAction: OnTxnAction;
   onClose: () => void;
 }) {
@@ -490,8 +508,18 @@ function TxnPickerModal({
     onClose();
     onTxnAction(target.id, "move", { to });
   };
-  const cats = (grp: "need" | "want") =>
-    categories.filter((c) => c.grp === grp && !(isExpense && c.name === target.rowLabel));
+  // Uncategorized (Alena 2026-11-14): file it there on purpose — the server
+  // flags the row so the rule engine doesn't put it straight back.
+  const pickUncategorized = () => {
+    onClose();
+    onTxnAction(target.id, "move", { to: "expense", categoryId: null });
+  };
+  const isHere = (name: string) => isExpense && name === target.rowLabel;
+  const catSection = (label: string, grp: CategoryGroup) => {
+    const cats = categories.filter((c) => c.grp === grp);
+    if (cats.length === 0) return null;
+    return section(label, cats.map((c) => destChip(c.name, () => pickCategory(c), undefined, isHere(c.name))));
+  };
 
   const section = (label: string, chips: React.ReactNode) => (
     <div className="mb-3">
@@ -512,7 +540,7 @@ function TxnPickerModal({
         role="dialog"
         aria-modal="true"
         aria-label={`Move ${target.txnLabel}`}
-        className="w-[360px] rounded-2xl p-6"
+        className="flex max-h-[85dvh] w-[360px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between gap-3">
@@ -524,12 +552,22 @@ function TxnPickerModal({
         <div className="mb-4 text-xs" style={{ color: MUTED }}>
           Currently in <b style={{ color: INK }}>{areaLabel(target.area, target.rowLabel)}</b> — move to:
         </div>
+        {/* The destinations scroll inside the modal. Without this a long
+            category list (or a short window) pushed the centered modal past
+            both screen edges and cut off its top — Income and the first
+            Needs chips — with no way to reach them (Alena 2026-11-14). */}
+        <div className="-mx-1 -mt-1 min-h-0 flex-1 overflow-y-auto px-1 pt-1">
         {target.area !== "income" && section("Income", destChip("Income", () => pickArea("income")))}
-        {cats("need").length > 0 && section("Needs", cats("need").map((c) => destChip(c.name, () => pickCategory(c))))}
-        {cats("want").length > 0 && section("Wants", cats("want").map((c) => destChip(c.name, () => pickCategory(c))))}
+        {catSection("Needs", "need")}
+        {catSection("Wants", "want")}
+        {catSection("Business", "business")}
         {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
-        {target.area !== "transfer" && section("Other", destChip("Transfer", () => pickArea("transfer")))}
+        {section("Other", [
+          destChip("Uncategorized", pickUncategorized, undefined, isHere("Uncategorized")),
+          destChip("Transfer", () => pickArea("transfer"), undefined, target.area === "transfer"),
+        ])}
         {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
+        </div>
       </div>
     </div>
   );
@@ -542,7 +580,7 @@ function TxnPickerModal({
 // to rename, delete is two-step. Standard modal manners: backdrop click and
 // Escape close. The list is the server's (`categories` re-fetches after
 // every change), so what is on screen is what is saved.
-type Cat = { id: number; name: string; grp: "need" | "want" };
+type Cat = { id: number; name: string; grp: CategoryGroup };
 
 function CategoriesModal({
   categories, busy, error, onAdd, onRename, onDelete, onClose,
@@ -550,13 +588,13 @@ function CategoriesModal({
   categories: Cat[];
   busy: boolean;
   error: string | null;
-  onAdd: (name: string, grp: "need" | "want") => Promise<boolean>;
+  onAdd: (name: string, grp: CategoryGroup) => Promise<boolean>;
   onRename: (id: number, name: string) => void;
   onDelete: (id: number) => void;
   onClose: () => void;
 }) {
   const [newName, setNewName] = useState("");
-  const [newGrp, setNewGrp] = useState<"need" | "want">("want");
+  const [newGrp, setNewGrp] = useState<CategoryGroup>("want");
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [armedId, setArmedId] = useState<number | null>(null);
 
@@ -624,7 +662,7 @@ function CategoriesModal({
     </div>
   );
 
-  const group = (label: string, grp: "need" | "want") => {
+  const group = (label: string, grp: CategoryGroup) => {
     const rows = categories.filter((c) => c.grp === grp);
     return (
       <div className="mb-3">
@@ -638,7 +676,7 @@ function CategoriesModal({
     );
   };
 
-  const grpChip = (label: string, grp: "need" | "want") => (
+  const grpChip = (label: string, grp: CategoryGroup) => (
     <button
       type="button"
       className="rounded-full px-2.5 py-1 text-xs"
@@ -663,7 +701,7 @@ function CategoriesModal({
         role="dialog"
         aria-modal="true"
         aria-label="Categories"
-        className="flex max-h-[85vh] w-[380px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
+        className="flex max-h-[85dvh] w-[380px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between">
@@ -679,6 +717,7 @@ function CategoriesModal({
         <div className="-mx-2 min-h-0 flex-1 overflow-y-auto">
           {group("Needs", "need")}
           {group("Wants", "want")}
+          {group("Business", "business")}
         </div>
 
         <div className="mt-3 border-t pt-4" style={{ borderColor: LINE }}>
@@ -697,6 +736,7 @@ function CategoriesModal({
             <div className="flex gap-1.5">
               {grpChip("Needs", "need")}
               {grpChip("Wants", "want")}
+              {grpChip("Business", "business")}
             </div>
             <button
               type="button"
@@ -723,7 +763,7 @@ function SavedRowModal({
   row, categories, onClose, onMoveAll, busy,
 }: {
   row: CashflowRow;
-  categories: { id: number; name: string; grp: "need" | "want" }[];
+  categories: { id: number; name: string; grp: CategoryGroup }[];
   onClose: () => void;
   onMoveAll: (to: "income" | "disputed" | "expense", categoryId?: number) => void;
   busy: boolean;
@@ -749,7 +789,7 @@ function SavedRowModal({
         role="dialog"
         aria-modal="true"
         aria-label={`Edit savings destination ${row.label}`}
-        className="w-[320px] rounded-2xl p-6"
+        className="max-h-[85dvh] w-[320px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between">
@@ -790,7 +830,7 @@ function AddTxnModal({
 }: {
   kind: "income" | "expense" | "saved";
   month: string;
-  categories: { id: number; name: string; grp: "need" | "want" }[];
+  categories: { id: number; name: string; grp: CategoryGroup }[];
   busy: boolean;
   error: string | null;
   onClose: () => void;
@@ -833,7 +873,7 @@ function AddTxnModal({
         onClick={() => setCategoryId(on ? null : c.id)}>{c.name}</button>
     );
   };
-  const section = (label: string, grp: "need" | "want") => {
+  const section = (label: string, grp: CategoryGroup) => {
     const cats = categories.filter((c) => c.grp === grp);
     if (cats.length === 0) return null;
     return (
@@ -854,7 +894,7 @@ function AddTxnModal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-[320px] rounded-2xl p-6"
+        className="max-h-[85dvh] w-[320px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -876,6 +916,7 @@ function AddTxnModal({
           <div className="mt-4">
             {section("Needs", "need")}
             {section("Wants", "want")}
+            {section("Business", "business")}
           </div>
         )}
         {error && <div className="mt-2 text-xs" style={{ color: BAD }}>{error}</div>}
@@ -1289,7 +1330,8 @@ export default function BudgetView({
   const rate = data.totalIncome > 0 ? pct(data.saved, data.totalIncome) : null;
   const { grade, gradeColor, gradeBg } = gradeFor(data.totalIncome, data.totalWants, data.saved);
   const needsRows = data.expenses.filter((e) => e.grp === "need");
-  const wantsRows = data.expenses.filter((e) => e.grp !== "need");
+  const businessRows = data.expenses.filter((e) => e.grp === "business");
+  const wantsRows = data.expenses.filter((e) => e.grp !== "need" && e.grp !== "business");
   // Manual entries only on months that derive from transactions. A stored
   // (sheet-imported / pre-redesign) month never reads transactions — the row
   // would either never show or silently replace the stored numbers.
@@ -1388,10 +1430,24 @@ export default function BudgetView({
             ))}
           </>
         )}
+        {/* Business — its own section beside Needs and Wants (Alena
+            2026-11-14): in Expenses, in neither the Needs nor Wants total */}
+        {businessRows.length > 0 && (
+          <>
+            <div className={`text-[11px] mb-1 ${needsRows.length > 0 || wantsRows.length > 0 ? "mt-4" : "mt-0"}`} style={{ color: MUTED }}>BUSINESS</div>
+            {businessRows.map((row) => (
+              <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
+                   open={openRow === `e:${row.label}`}
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
+                   openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                   onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
+            ))}
+          </>
+        )}
         {/* Disputed folder — negated charges stay visible for audit, no
             share bar, counted in no total (spec Alena 2026-07-28) */}
         {data.disputed && (
-          <div className={needsRows.length > 0 || wantsRows.length > 0 ? "mt-4" : "mt-0"}>
+          <div className={data.expenses.length > 0 ? "mt-4" : "mt-0"}>
             <Row row={data.disputed} total={data.totalExpenses} valueColor={MUTED} area="disputed"
                  open={openRow === "d:Disputed"}
                  onToggle={() => setOpenRow(openRow === "d:Disputed" ? null : "d:Disputed")}
@@ -1404,7 +1460,7 @@ export default function BudgetView({
             withdrawals) plus the user's moves. Visible so each can be
             re-filed, counted in no total (Alena 2026-11-14) */}
         {data.transfers && (
-          <div className={needsRows.length > 0 || wantsRows.length > 0 || data.disputed ? "mt-4" : "mt-0"}>
+          <div className={data.expenses.length > 0 || data.disputed ? "mt-4" : "mt-0"}>
             <Row row={data.transfers} total={data.totalExpenses} valueColor={MUTED} area="transfer"
                  open={openRow === "t:Transfer"}
                  onToggle={() => setOpenRow(openRow === "t:Transfer" ? null : "t:Transfer")}

@@ -6,7 +6,7 @@ import {
   cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions,
   monthShowsDerived, TXN_MONTH_SQL,
 } from "@/lib/derive";
-import type { CashflowData, CashflowRow } from "@/lib/types";
+import type { CashflowData, CashflowRow, CategoryGroup } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -45,7 +45,7 @@ function buildCashflowData(month: string): CashflowData {
   ).map((r) => r.month);
   const categories = d
     .prepare(`SELECT id, name, COALESCE(grp,'want') grp FROM categories ORDER BY sort ASC`)
-    .all() as { id: number; name: string; grp: "need" | "want" }[];
+    .all() as { id: number; name: string; grp: CategoryGroup }[];
   const base = { month, monthLabel: monthLabel(month), months, categories, txnMonthMin: txnMonthMin(d) };
 
   // Sheet months predate transaction data. Every other month is read live:
@@ -59,7 +59,7 @@ function buildCashflowData(month: string): CashflowData {
         ...base, source: "derived",
         income: v.income, totalIncome: v.totalIncome,
         expenses: v.expenses, totalExpenses: v.totalExpenses,
-        totalNeeds: v.totalNeeds, totalWants: v.totalWants,
+        totalNeeds: v.totalNeeds, totalWants: v.totalWants, totalBusiness: v.totalBusiness,
         saved: round2(v.totalIncome - v.totalExpenses),
         savedRows: v.savedRows, totalSaved: v.totalSaved,
         disputed: v.disputed, transfers: v.transfers,
@@ -67,7 +67,7 @@ function buildCashflowData(month: string): CashflowData {
     }
   }
 
-  const noTxns = (r: { label: string; value: number }, grp?: "need" | "want"): CashflowRow =>
+  const noTxns = (r: { label: string; value: number }, grp?: CategoryGroup): CashflowRow =>
     ({ ...r, txns: [], ...(grp ? { grp } : {}) });
   const income = (JSON.parse(row.income_json) as { label: string; value: number }[]).map((r) => noTxns(r));
   const fixed = (
@@ -84,7 +84,7 @@ function buildCashflowData(month: string): CashflowData {
     ...base, source: "stored",
     income, totalIncome: row.total_income,
     expenses, totalExpenses,
-    totalNeeds: row.total_fixed, totalWants: row.total_variable,
+    totalNeeds: row.total_fixed, totalWants: row.total_variable, totalBusiness: 0,
     saved: round2(row.total_income - totalExpenses),
     // stored months itemize nothing but the two folders (see above)
     savedRows: [], totalSaved: 0, disputed: v?.disputed ?? null, transfers: v?.transfers ?? null,

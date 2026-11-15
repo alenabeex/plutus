@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { db } from "./db";
-import type { CashflowRow, CashflowTxn } from "./types";
+import type { CashflowRow, CashflowTxn, CategoryGroup } from "./types";
 
 // Derivation layer: linked-connection data → the three views.
 // - Net worth: already derived (accounts+balances → latestBalances).
@@ -341,7 +341,8 @@ export function categorizeTransactions(d: Database.Database = db()): number {
   ).all() as { pattern: string; category_id: number }[]);
 
   const uncat = d.prepare(
-    `SELECT id, name, merchant FROM transactions WHERE category_id IS NULL AND pending = 0`,
+    `SELECT id, name, merchant FROM transactions
+     WHERE category_id IS NULL AND pending = 0 AND COALESCE(no_auto_category, 0) = 0`,
   ).all() as { id: number; name: string | null; merchant: string | null }[];
 
   const upd = d.prepare(`UPDATE transactions SET category_id = ? WHERE id = ?`);
@@ -473,6 +474,7 @@ export interface DerivedCashflowView {
   totalExpenses: number;
   totalNeeds: number;
   totalWants: number;
+  totalBusiness: number;
   savedRows: CashflowRow[];  // txn_class='saved' — income that became investments
   totalSaved: number;
   disputed: CashflowRow | null; // txn_class='excluded', one folder — visible, never counted
@@ -535,6 +537,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   let transferOut = 0;
   let transferIn = 0;
   let totalNeeds = 0;
+  let totalBusiness = 0;
 
   for (const r of rows) {
     // Source account for the drill-down row: nickname/name + masked digits.
@@ -575,11 +578,13 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       savedBy.set(r.label, row);
     } else {
       const key = r.cat ?? "Uncategorized";
-      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp: r.grp === "need" ? "need" : "want" };
+      const grp: CategoryGroup = r.grp === "need" ? "need" : r.grp === "business" ? "business" : "want";
+      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp };
       row.value = round2(row.value + r.amount);
       row.txns.push(txn(round2(r.amount)));
       expenseBy.set(key, row);
-      if (r.grp === "need") totalNeeds = round2(totalNeeds + r.amount);
+      if (grp === "need") totalNeeds = round2(totalNeeds + r.amount);
+      if (grp === "business") totalBusiness = round2(totalBusiness + r.amount);
     }
   }
 
@@ -592,7 +597,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
 
   return {
     income, totalIncome, expenses, totalExpenses,
-    totalNeeds, totalWants: round2(totalExpenses - totalNeeds),
+    totalNeeds, totalBusiness, totalWants: round2(totalExpenses - totalNeeds - totalBusiness),
     savedRows, totalSaved,
     disputed: disputedTxns.length > 0
       ? { label: "Disputed", value: disputedTotal, txns: disputedTxns }
