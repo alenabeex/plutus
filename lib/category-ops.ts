@@ -1,0 +1,89 @@
+import type Database from "better-sqlite3-multiple-ciphers";
+
+// Category list edits (Alena 2026-11-14): the Expenses card's Edit opens a
+// list of every category, where categories are added, renamed and deleted
+// on the fly. This file is the tested seam for those writes and for the
+// default-category seeding they must coexist with. No `db` import: every
+// function takes the connection, so lib/db can call seedDefaultCategories
+// during its own migrate() without a cycle.
+
+export type CategoryGroup = "need" | "want";
+
+/** Input the caller got wrong — the route answers these with a 400. */
+export class CategoryError extends Error {}
+
+// Labels Cash Flow renders that are not categories — a category with one of
+// these names would merge into, or be mistaken for, that row.
+const RESERVED = ["uncategorized", "income", "savings", "disputed", "transfer"];
+
+function cleanName(d: Database.Database, raw: unknown, exceptId?: number): string {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!name || name.length > 40) throw new CategoryError("Name must be 1–40 characters");
+  if (RESERVED.includes(name.toLowerCase())) throw new CategoryError(`"${name}" is a built-in section, pick another name`);
+  const clash = d.prepare(`SELECT id FROM categories WHERE lower(name) = lower(?) AND id IS NOT ?`)
+    .get(name, exceptId ?? null);
+  if (clash) throw new CategoryError("A category with that name already exists");
+  return name;
+}
+
+/** Add a category at the end of the list. Returns its id. */
+export function addCategory(d: Database.Database, input: { name: unknown; grp: unknown }): number {
+  if (input.grp !== "need" && input.grp !== "want") throw new CategoryError("Pick Needs or Wants");
+  const name = cleanName(d, input.name);
+  const { next } = d.prepare(`SELECT COALESCE(MAX(sort), -1) + 1 next FROM categories`).get() as { next: number };
+  const r = d.prepare(`INSERT INTO categories (name, sort, grp) VALUES (?, ?, ?)`).run(name, next, input.grp);
+  return Number(r.lastInsertRowid);
+}
+
+/** Rename. Rules and transactions reference category_id, so a rename is
+ *  label-only — nothing recategorizes. */
+export function renameCategory(d: Database.Database, id: number, rawName: unknown): void {
+  if (!d.prepare(`SELECT id FROM categories WHERE id = ?`).get(id)) throw new CategoryError("category not found");
+  d.prepare(`UPDATE categories SET name = ? WHERE id = ?`).run(cleanName(d, rawName, id), id);
+}
+
+/** Delete. Non-destructive to the ledger — the category's transactions fall
+ *  back to Uncategorized (category_id NULL, still visible, still
+ *  re-categorizable) and its learned rules go with it, so nothing can file
+ *  a transaction under a label that no longer exists. Returns how many
+ *  transactions were released. */
+export function deleteCategory(d: Database.Database, id: number): number {
+  if (!d.prepare(`SELECT id FROM categories WHERE id = ?`).get(id)) throw new CategoryError("category not found");
+  return d.transaction(() => {
+    const released = d.prepare(`UPDATE transactions SET category_id = NULL WHERE category_id = ?`).run(id).changes;
+    d.prepare(`DELETE FROM category_rules WHERE category_id = ?`).run(id);
+    d.prepare(`DELETE FROM categories WHERE id = ?`).run(id);
+    return released;
+  })();
+}
+
+/** Seed the default categories — each default exactly once per database.
+ *  This runs on every start, and it used to INSERT OR IGNORE the whole
+ *  default list every time: a default the user deleted came back on the
+ *  next start, and a renamed one reappeared beside its new name. Now every
+ *  default that has been offered is recorded in seeded_default_categories
+ *  and never offered again, so the user's list is theirs. A default added
+ *  to the app later is not in the record yet and still reaches existing
+ *  databases. The need/want group is set at seeding only — a later change
+ *  by the user is not undone. */
+export function seedDefaultCategories(
+  d: Database.Database,
+  defaults: readonly string[],
+  needs: readonly string[],
+): void {
+  d.exec(`CREATE TABLE IF NOT EXISTS seeded_default_categories (name TEXT PRIMARY KEY)`);
+  const seeded = new Set(
+    (d.prepare(`SELECT name FROM seeded_default_categories`).all() as { name: string }[]).map((r) => r.name),
+  );
+  const insCat = d.prepare(`INSERT OR IGNORE INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
+  const setGrp = d.prepare(`UPDATE categories SET grp = ? WHERE name = ?`);
+  const mark = d.prepare(`INSERT OR IGNORE INTO seeded_default_categories (name) VALUES (?)`);
+  defaults.forEach((name, i) => {
+    if (seeded.has(name)) return;
+    const grp = needs.includes(name) ? "need" : "want";
+    insCat.run(name, i, grp);
+    setGrp.run(grp, name);
+    mark.run(name);
+  });
+  d.prepare(`UPDATE categories SET grp = 'want' WHERE grp IS NULL`).run();
+}

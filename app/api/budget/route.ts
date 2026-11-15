@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { monthLabel, isValidMonthKey } from "@/lib/format";
-import { cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions } from "@/lib/derive";
+import {
+  cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions,
+  monthShowsDerived, TXN_MONTH_SQL,
+} from "@/lib/derive";
 import type { CashflowData, CashflowRow } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,7 +19,7 @@ const currentMonth = () => new Date().toISOString().slice(0, 7);
  *  but the nav still needs to know history goes back that far. */
 function txnMonthMin(d: ReturnType<typeof db>): string | null {
   const row = d.prepare(
-    `SELECT MIN(substr(date,1,7)) m FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense')`,
+    `SELECT MIN(${TXN_MONTH_SQL}) m FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense')`,
   ).get() as { m: string | null };
   return row?.m ?? null;
 }
@@ -45,9 +48,13 @@ function buildCashflowData(month: string): CashflowData {
     .all() as { id: number; name: string; grp: "need" | "want" }[];
   const base = { month, monthLabel: monthLabel(month), months, categories, txnMonthMin: txnMonthMin(d) };
 
-  if (row.source !== "sheet") {
-    const v = cashflowView(month, d);
-    if (v.txnCount > 0) {
+  // Sheet months predate transaction data. Every other month is read live:
+  // either the whole view derives, or — for a month still showing stored
+  // numbers — at least its Transfer / Disputed folders do, so a row filed
+  // there is never unreachable.
+  const v = row.source !== "sheet" ? cashflowView(month, d) : null;
+  if (v) {
+    if (monthShowsDerived(v, row)) {
       return {
         ...base, source: "derived",
         income: v.income, totalIncome: v.totalIncome,
@@ -55,7 +62,7 @@ function buildCashflowData(month: string): CashflowData {
         totalNeeds: v.totalNeeds, totalWants: v.totalWants,
         saved: round2(v.totalIncome - v.totalExpenses),
         savedRows: v.savedRows, totalSaved: v.totalSaved,
-        disputed: v.disputed,
+        disputed: v.disputed, transfers: v.transfers,
       };
     }
   }
@@ -79,8 +86,8 @@ function buildCashflowData(month: string): CashflowData {
     expenses, totalExpenses,
     totalNeeds: row.total_fixed, totalWants: row.total_variable,
     saved: round2(row.total_income - totalExpenses),
-    // sheet months predate transaction data — nothing to itemize
-    savedRows: [], totalSaved: 0, disputed: null,
+    // stored months itemize nothing but the two folders (see above)
+    savedRows: [], totalSaved: 0, disputed: v?.disputed ?? null, transfers: v?.transfers ?? null,
   };
 }
 
@@ -127,8 +134,8 @@ export const GET = withJsonErrors(async (req: NextRequest) => {
     ).map((r) => r.month);
     const gatedTxnCount = (
       dd.prepare(
-        `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND date LIKE ?`,
-      ).get(`${month}%`) as { n: number }
+        `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND ${TXN_MONTH_SQL} = ?`,
+      ).get(month) as { n: number }
     ).n;
     return NextResponse.json(
       { error: "month-not-found", month, months, txnMonthMin: txnMonthMin(dd), gatedTxnCount },
@@ -160,8 +167,8 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   const d = db();
   const settled = (
     d.prepare(
-      `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND date LIKE ?`,
-    ).get(`${month}%`) as { n: number }
+      `SELECT COUNT(*) n FROM transactions WHERE pending = 0 AND txn_class IN ('income','expense') AND ${TXN_MONTH_SQL} = ?`,
+    ).get(month) as { n: number }
   ).n;
   if (settled < 1) {
     return NextResponse.json({ ok: false, error: "no-transactions" }, { status: 400 });

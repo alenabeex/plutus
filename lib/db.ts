@@ -5,6 +5,7 @@ import path from "node:path";
 import { dbKey } from "./keychain";
 import { DEMO_SEED, DEFAULT_CATEGORIES, NEED_CATEGORIES, type SeedConfig } from "./seed-config";
 import { gradeFor } from "./format";
+import { seedDefaultCategories } from "./category-ops";
 
 // Data NEVER lives in the vault/git — ~/FinanceTracker/ only (plan §Decisions).
 // FT_DEMO=1 → separate demo.db seeded with fake data; AI agents develop and
@@ -129,6 +130,8 @@ function migrate(d: Database.Database) {
 
   // v4: Cash Flow derivation contract (plan §Phase 4 revision 2026-07-25).
   // - transactions.txn_class: 'income' | 'expense' | 'transfer' | NULL
+  //   (later: 'saved', 'excluded' = Disputed, 'transfer_manual' = the user's
+  //   own Transfer folder — distinct from the classifier's 'transfer')
   //   (NULL = not yet classified; the classify pass in lib/derive fills it).
   // - transactions.pfc: Plaid personal_finance_category primary, captured at
   //   sync — the strongest transfer/income signal when present.
@@ -140,6 +143,19 @@ function migrate(d: Database.Database) {
   );
   if (!txnCols.has("txn_class")) d.exec(`ALTER TABLE transactions ADD COLUMN txn_class TEXT`);
   if (!txnCols.has("pfc")) d.exec(`ALTER TABLE transactions ADD COLUMN pfc TEXT`);
+  // Date override (2026-11-14): 'YYYY-MM-DD' when the user re-dated a
+  // transaction so it counts under another day/month; NULL = the bank's
+  // date. `date` itself stays Plaid's — sync rewrites it. Read through
+  // TXN_DATE_SQL / TXN_MONTH_SQL (lib/derive), written by lib/set-txn-date.
+  if (!txnCols.has("date_override")) d.exec(`ALTER TABLE transactions ADD COLUMN date_override TEXT`);
+  // cashflow_month was this column's month-only predecessor. It never
+  // reached main, but a dev database that ran that branch has it: carry any
+  // value over as the 1st of that month, then drop the column.
+  if (txnCols.has("cashflow_month")) {
+    d.exec(`UPDATE transactions SET date_override = cashflow_month || '-01'
+            WHERE cashflow_month IS NOT NULL AND date_override IS NULL`);
+    d.exec(`ALTER TABLE transactions DROP COLUMN cashflow_month`);
+  }
   const catCols = new Set(
     (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
   );
@@ -155,17 +171,10 @@ function migrate(d: Database.Database) {
   if (!manCols.has("icon")) d.exec(`ALTER TABLE manual_assets ADD COLUMN icon TEXT`);
 
   // Cash Flow taxonomy upkeep — runs every start so pre-v4 databases (and
-  // fresh ones) converge on the same category set + need/want grouping.
-  // INSERT OR IGNORE: user-added categories and existing rows are untouched;
-  // only grp is normalized for the known names.
-  const insCat = d.prepare(`INSERT OR IGNORE INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
-  const setGrp = d.prepare(`UPDATE categories SET grp = ? WHERE name = ?`);
-  DEFAULT_CATEGORIES.forEach((name, i) => {
-    const grp = (NEED_CATEGORIES as readonly string[]).includes(name) ? "need" : "want";
-    insCat.run(name, i, grp);
-    setGrp.run(grp, name);
-  });
-  d.prepare(`UPDATE categories SET grp = 'want' WHERE grp IS NULL`).run();
+  // fresh ones) converge on the default category set + need/want grouping.
+  // Each default is offered once per database (lib/category-ops): the
+  // user's own adds, renames and deletes are never undone by a restart.
+  seedDefaultCategories(d, DEFAULT_CATEGORIES, NEED_CATEGORIES);
 
   // Heal both halves of a half-finished removal. The old connections DELETE
   // handler ran outside a transaction, so when its item delete hit the

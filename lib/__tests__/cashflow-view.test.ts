@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
-import { cashflowView, ensureMonthsFromTransactions } from "../derive";
+import { cashflowView, ensureMonthsFromTransactions, monthShowsDerived } from "../derive";
 
 function makeDb(): Database.Database {
   const d = new Database(":memory:");
@@ -12,15 +12,17 @@ function makeDb(): Database.Database {
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, date TEXT, name TEXT, merchant TEXT,
       amount REAL, category_id INTEGER, pending INTEGER DEFAULT 0,
-      txn_class TEXT
+      txn_class TEXT, date_override TEXT
     );
     CREATE TABLE budget_months (month TEXT PRIMARY KEY);
     -- cashflowView LEFT JOINs accounts for the drill-down source-account
-    -- label (nickname/name + mask). Fixture rows never set account_id, so
-    -- every join resolves to NULL — matches none of the existing assertions,
-    -- this table just needs to exist so the query itself doesn't error.
+    -- label (nickname/name + mask) and for the account role that decides
+    -- whether a classifier 'transfer' row shows in the Transfer folder.
+    -- Most fixture rows set no account_id, so the join resolves to NULL;
+    -- the Transfer-folder tests insert their own accounts.
     CREATE TABLE accounts (
-      id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT
+      id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT,
+      kind TEXT, institution TEXT, cashflow_role TEXT
     );
   `);
   const cat = d.prepare(`INSERT INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
@@ -33,13 +35,14 @@ function makeDb(): Database.Database {
 
 function txn(d: Database.Database, t: {
   date: string; name: string; merchant?: string; amount: number;
-  category_id?: number; pending?: number; txn_class?: string;
+  category_id?: number; pending?: number; txn_class?: string; date_override?: string;
+  account_id?: number;
 }) {
   d.prepare(
-    `INSERT INTO transactions (date, name, merchant, amount, category_id, pending, txn_class)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(t.date, t.name, t.merchant ?? null, t.amount, t.category_id ?? null,
-        t.pending ?? 0, t.txn_class ?? "expense");
+    `INSERT INTO transactions (account_id, date, name, merchant, amount, category_id, pending, txn_class, date_override)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(t.account_id ?? null, t.date, t.name, t.merchant ?? null, t.amount, t.category_id ?? null,
+        t.pending ?? 0, t.txn_class ?? "expense", t.date_override ?? null);
 }
 
 describe("cashflowView", () => {
@@ -99,13 +102,15 @@ describe("cashflowView", () => {
     expect(v.totalIncome).toBe(5200);
   });
 
-  it("ignores pending, transfers, and other months", () => {
+  it("ignores pending and other months; a transfer counts in no total", () => {
     txn(d, { date: "2026-07-10", name: "PENDING", amount: 50, category_id: 3, pending: 1 });
     txn(d, { date: "2026-07-11", name: "CC PAYMENT", amount: 500, txn_class: "transfer" });
     txn(d, { date: "2026-06-11", name: "LAST MONTH", amount: 40, category_id: 3 });
     const v = cashflowView("2026-07", d);
     expect(v.txnCount).toBe(0);
     expect(v.expenses).toEqual([]);
+    expect(v.totalExpenses).toBe(0);
+    expect(v.transfers?.txns.map((t) => t.label)).toEqual(["CC PAYMENT"]);
   });
 
   it("ignores disputed transactions (txn_class 'excluded')", () => {
@@ -114,6 +119,89 @@ describe("cashflowView", () => {
     expect(v.txnCount).toBe(0);
     expect(v.expenses).toEqual([]);
     expect(v.totalExpenses).toBe(0);
+  });
+
+  // Manual Transfer destination (Alena 2026-11-14): own-account moves the
+  // classifier got wrong. One visible folder, in no total — and stored as
+  // 'transfer_manual', never the machine's 'transfer'.
+  it("collects manual transfers into one folder that counts in no total", () => {
+    txn(d, { date: "2026-07-03", name: "ZELLE FROM SELF", amount: -200, txn_class: "transfer_manual" });
+    txn(d, { date: "2026-07-09", name: "MOVE TO JOINT", amount: 75, category_id: 3, txn_class: "transfer_manual" });
+    const v = cashflowView("2026-07", d);
+    expect(v.transfers?.label).toBe("Transfer");
+    // header = the larger side (200 in vs 75 out), never the 275 sum
+    expect(v.transfers?.value).toBe(200);
+    expect(v.transfers?.txns.map((t) => t.value)).toEqual([75, 200]);
+    expect(v.totalIncome).toBe(0);
+    expect(v.totalExpenses).toBe(0);
+    expect(v.txnCount).toBe(0);
+  });
+
+  // Every settled transaction on a cash or card account must be visible
+  // somewhere (Alena 2026-11-14: "I don't see any withdrawals"). Plaid tags
+  // ATM withdrawals TRANSFER_OUT_WITHDRAWAL, so the classifier benches them
+  // as 'transfer' — they belong in the folder, where they can be re-filed.
+  it("lists machine-classified transfers from cash accounts in the folder", () => {
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (1, 'Everyday Checking', 'cash')`).run();
+    txn(d, { account_id: 1, date: "2026-07-03", name: "ATM WITHDRAWAL", amount: 60, txn_class: "transfer" });
+    const v = cashflowView("2026-07", d);
+    expect(v.transfers?.txns.map((t) => t.label)).toEqual(["ATM WITHDRAWAL"]);
+    expect(v.transfers?.value).toBe(60);
+    expect(v.totalExpenses).toBe(0);
+    expect(v.txnCount).toBe(0);
+  });
+
+  it("keeps investment-account activity out of the folder", () => {
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (2, 'Brokerage', 'investment')`).run();
+    txn(d, { account_id: 2, date: "2026-07-03", name: "BUY VTI", amount: 500, txn_class: "transfer" });
+    expect(cashflowView("2026-07", d).transfers).toBeNull();
+  });
+
+  it("shows a two-leg card payment once in the folder header", () => {
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (1, 'Everyday Checking', 'cash')`).run();
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (3, 'Travel Card', 'credit')`).run();
+    txn(d, { account_id: 1, date: "2026-07-20", name: "CARD PAYMENT", amount: 500, txn_class: "transfer" });
+    txn(d, { account_id: 3, date: "2026-07-20", name: "PAYMENT THANK YOU", amount: -500, txn_class: "transfer" });
+    const v = cashflowView("2026-07", d);
+    expect(v.transfers?.txns).toHaveLength(2);
+    expect(v.transfers?.value).toBe(500);
+  });
+
+  // Date edit (Alena 2026-11-14): date_override re-dates a transaction, and
+  // it counts as an entry for that date's month.
+  it("files a transaction under its date_override, and reports the bank date", () => {
+    txn(d, { date: "2026-07-31", name: "EARLY PAYCHECK", amount: -3000, txn_class: "income", date_override: "2026-08-01" });
+    expect(cashflowView("2026-07", d).txnCount).toBe(0);
+    const aug = cashflowView("2026-08", d);
+    expect(aug.totalIncome).toBe(3000);
+    expect(aug.income[0].txns[0].date).toBe("2026-08-01");
+    expect(aug.income[0].txns[0].bankDate).toBe("2026-07-31");
+  });
+
+  it("carries no bankDate on a transaction that was never re-dated", () => {
+    txn(d, { date: "2026-07-14", name: "SAFEWAY", amount: 20, category_id: 3 });
+    expect(cashflowView("2026-07", d).expenses[0].txns[0]).not.toHaveProperty("bankDate");
+  });
+});
+
+// Which payload a non-sheet month renders (review of PR 6): a month whose
+// only rows sit in the Transfer / Disputed folders must still render them.
+describe("monthShowsDerived", () => {
+  const folder = { label: "Transfer", value: 60, txns: [] };
+  const empty = { total_income: 0, total_fixed: 0, total_variable: 0 };
+
+  it("is derived whenever counted rows exist", () => {
+    expect(monthShowsDerived({ txnCount: 1, transfers: null, disputed: null }, { total_income: 4000 })).toBe(true);
+  });
+  it("is derived for a folder-only month with no stored numbers", () => {
+    expect(monthShowsDerived({ txnCount: 0, transfers: folder, disputed: null }, empty)).toBe(true);
+    expect(monthShowsDerived({ txnCount: 0, transfers: null, disputed: folder }, empty)).toBe(true);
+  });
+  it("keeps stored numbers on screen when a folder is all the month has", () => {
+    expect(monthShowsDerived({ txnCount: 0, transfers: folder, disputed: null }, { total_income: 4000 })).toBe(false);
+  });
+  it("is not derived for a month with nothing at all", () => {
+    expect(monthShowsDerived({ txnCount: 0, transfers: null, disputed: null }, empty)).toBe(false);
   });
 });
 

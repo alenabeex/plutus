@@ -9,7 +9,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown, ChevronRight, Pencil, X,
-  Banknote, PiggyBank, Flag, Tag, HelpCircle,
+  Banknote, PiggyBank, Flag, Tag, HelpCircle, ArrowLeftRight,
   ShoppingCart, Utensils, Ticket, Wrench, Home, PawPrint, Gift, Fuel,
   Plane, ShoppingBag, GraduationCap, Smartphone, Receipt, Zap, Wifi,
   Shield, HeartPulse, Building2, Bitcoin,
@@ -18,7 +18,7 @@ import {
 import { MonthPicker } from "@/components/month-picker";
 import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { MENU_ITEM, menuItemHover } from "@/lib/styles";
-import { usd, gradeFor } from "@/lib/format";
+import { usd, gradeFor, monthLabel } from "@/lib/format";
 import type { CashflowData, CashflowRow, CashflowTxn } from "@/lib/types";
 
 interface BudgetViewProps {
@@ -73,8 +73,9 @@ function Tile({ label, value, bg, color, sub, subColor }: {
 // Every Cash Flow area a transaction can live in. `area` drives which move
 // targets the popover offers — you can move a txn anywhere but where it
 // already is. Disputed is a real area (the folder at the bottom of
-// Expenses), so a disputed txn can be moved back out the same way.
-export type CashflowArea = "income" | "expense" | "saved" | "disputed";
+// Expenses), so a disputed txn can be moved back out the same way — and so
+// is Transfer, the folder under it (Alena 2026-11-14).
+export type CashflowArea = "income" | "expense" | "saved" | "disputed" | "transfer";
 
 export interface TxnActionOpts {
   categoryId?: number;
@@ -108,19 +109,32 @@ function areaLabel(area: CashflowArea, rowLabel: string): string {
   return area === "income" ? "Income"
     : area === "saved" ? "Savings"
     : area === "disputed" ? "Disputed"
+    : area === "transfer" ? "Transfer"
     : rowLabel;
+}
+
+/** Last day of the user's current month, 'YYYY-MM-DD' — the date editor's
+ *  ceiling. Local time on purpose: the page's month cap is the local month
+ *  (app/page.tsx), and the server allows for the UTC offset. */
+function localMonthEnd(): string {
+  const now = new Date();
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${last.getFullYear()}-${p(last.getMonth() + 1)}-${p(last.getDate())}`;
 }
 
 // Actions popover for one transaction — anchored to its own ⋯ button so
 // each txn row owns its outside-click-close listener independently (same
 // idiom as the header's Export popover / plusRef, just one instance per
-// row instead of one for the whole view). One line (spec Alena 2026-07-29):
-// [Rename] [current-location ▾]. Rename swaps the line for an input; the
-// pill opens the TxnPickerModal — destinations live in their own modal,
-// grouped Income / Needs / Wants / Savings / Disputed, not inline here.
+// row instead of one for the whole view). Three rows: Rename · Category ·
+// Month (Alena 2026-11-14). Rename swaps the rows for an input; Category
+// opens the TxnPickerModal — destinations live in their own modal, grouped
+// Income / Needs / Wants / Savings / Other / Disputed, not inline here;
+// Month swaps the rows for a date editor — the transaction counts as an
+// entry for whatever month that date falls in.
 function TxnRow({
   t, rowLabel, area, isOpen,
-  onToggle, onClose, onOpenPicker, onRename,
+  onToggle, onClose, onOpenPicker, onRename, onSetDate,
 }: {
   t: CashflowTxn;
   rowLabel: string;
@@ -130,9 +144,17 @@ function TxnRow({
   onClose: () => void;
   onOpenPicker: () => void;
   onRename: (label: string) => void;
+  onSetDate: (date: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
+  const [dating, setDating] = useState(false);
+  const [dateDraft, setDateDraft] = useState(t.date);
+  const saveDate = (date: string) => {
+    if (!date || date === t.date) { setDating(false); return; }
+    onClose();
+    onSetDate(date);
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,6 +174,7 @@ function TxnRow({
 
   // popover closed → next open starts on the action rows, not a stale input
   if (!isOpen && renaming) setRenaming(false);
+  if (!isOpen && dating) setDating(false);
 
   return (
     <div
@@ -202,10 +225,52 @@ function TxnRow({
                 className="w-full rounded-lg px-2 py-1.5 text-xs text-left"
                 style={{ border: `1px solid ${MUTED}`, color: INK, background: "#fff" }}
               />
+            ) : dating ? (
+              /* keyed: without it React reuses a menu row's <button> node
+                 for Save, and MENU_ITEM's inline `all: unset` — which the
+                 browser expands into every longhand — never fully clears */
+              <div key="date" className="text-left">
+                <label className="mb-1.5 block text-[11px]" style={{ color: MUTED }} htmlFor={`txn-date-${t.id}`}>
+                  Counts in the month of this date
+                </label>
+                <input
+                  id={`txn-date-${t.id}`}
+                  type="date"
+                  autoFocus
+                  value={dateDraft}
+                  max={localMonthEnd()}
+                  onChange={(e) => setDateDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveDate(dateDraft);
+                    if (e.key === "Escape") { e.stopPropagation(); setDating(false); }
+                  }}
+                  className="w-full rounded-lg px-2 py-1.5 text-xs"
+                  style={{ border: `1px solid ${MUTED}`, color: INK, background: CARD }}
+                />
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-full py-1.5 text-xs font-semibold"
+                  style={{
+                    background: INK, color: CARD,
+                    cursor: dateDraft && dateDraft !== t.date ? "pointer" : "default",
+                    opacity: dateDraft && dateDraft !== t.date ? 1 : 0.5,
+                  }}
+                  disabled={!dateDraft || dateDraft === t.date}
+                  onClick={() => saveDate(dateDraft)}
+                >
+                  Save
+                </button>
+                {t.bankDate && (
+                  <button type="button" style={MENU_ITEM} {...menuItemHover} className="mt-1"
+                          onClick={() => saveDate(t.bankDate!)}>
+                    Reset to bank date ({t.bankDate.slice(5)})
+                  </button>
+                )}
+              </div>
             ) : (
               /* stacked full-width rows with the Export menu's SOFT row
                  hover — the app's one popover standard (Alena, 2026-07-29) */
-              <div className="text-left">
+              <div key="menu" className="text-left">
                 <button type="button" style={MENU_ITEM} {...menuItemHover} onClick={() => setRenaming(true)}>
                   Rename
                 </button>
@@ -220,6 +285,20 @@ function TxnRow({
                     <span>Category</span>
                     <span className="flex min-w-0 items-center gap-0.5" style={{ color: MUTED }}>
                       <span className="truncate">{areaLabel(area, rowLabel)}</span>
+                      <ChevronRight size={13} aria-hidden className="shrink-0" />
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  style={MENU_ITEM}
+                  {...menuItemHover}
+                  onClick={() => { setDateDraft(t.date); setDating(true); }}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Month</span>
+                    <span className="flex min-w-0 items-center gap-0.5" style={{ color: MUTED }}>
+                      <span className="truncate">{monthLabel(t.date.slice(0, 7))}</span>
                       <ChevronRight size={13} aria-hidden className="shrink-0" />
                     </span>
                   </span>
@@ -263,6 +342,7 @@ const ICON_RULES: [RegExp, LucideIcon][] = [
 function rowIcon(label: string, area: CashflowArea): LucideIcon {
   if (area === "income") return Banknote;
   if (area === "disputed") return Flag;
+  if (area === "transfer") return ArrowLeftRight;
   const matched = ICON_RULES.find(([re]) => re.test(label))?.[1];
   // saved destinations keyword-match too (Crypto → Bitcoin), piggy bank otherwise
   if (area === "saved") return matched ?? PiggyBank;
@@ -271,7 +351,7 @@ function rowIcon(label: string, area: CashflowArea): LucideIcon {
 
 function Row({
   row, total, open, onToggle, valueColor, area,
-  openTxnMenu, onToggleTxnMenu, onCloseTxnMenu, onOpenPicker, onRenameTxn,
+  openTxnMenu, onToggleTxnMenu, onCloseTxnMenu, onOpenPicker, onRenameTxn, onSetTxnDate,
   onEdit,
 }: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
@@ -281,14 +361,16 @@ function Row({
   onCloseTxnMenu: () => void;
   onOpenPicker: (target: PickerTarget) => void;
   onRenameTxn: (id: number, label: string) => void;
+  onSetTxnDate: (id: number, date: string) => void;
   /** edit mode: clicking the row opens the category modal instead of drilling */
   onEdit?: () => void;
 }) {
   const drillable = row.txns.length > 0;
   const share = pct(row.value, total);
   // The Disputed folder shows no share bar or % — its amounts are negated,
-  // so a share of expenses would be a lie (spec Alena 2026-07-28).
-  const noBar = area === "disputed";
+  // so a share of expenses would be a lie (spec Alena 2026-07-28). Same for
+  // the Transfer folder: own-account moves are not a share of spending.
+  const noBar = area === "disputed" || area === "transfer";
   // rowIcon returns one of a fixed set of static lucide components, so this
   // is a lookup, not a component created during render — createElement keeps
   // the react-hooks/static-components lint honest about that.
@@ -357,6 +439,7 @@ function Row({
               onClose={onCloseTxnMenu}
               onOpenPicker={() => onOpenPicker({ id: t.id, area, rowLabel: row.label, txnLabel: t.label })}
               onRename={(label) => onRenameTxn(t.id, label)}
+              onSetDate={(date) => onSetTxnDate(t.id, date)}
             />
           ))}
           {area === "expense" && (
@@ -373,7 +456,7 @@ function Row({
 // Where a single transaction can be re-filed (spec Alena 2026-07-29): its
 // own modal, opened from the row popover's category pill. Destinations are
 // grouped under uppercase micro-labels — Income · Needs · Wants · Savings ·
-// Disputed — the current location's chip is omitted.
+// Other (Transfer) · Disputed — the current location's chip is omitted.
 export interface PickerTarget {
   id: number;
   area: CashflowArea;
@@ -445,27 +528,37 @@ function TxnPickerModal({
         {cats("need").length > 0 && section("Needs", cats("need").map((c) => destChip(c.name, () => pickCategory(c))))}
         {cats("want").length > 0 && section("Wants", cats("want").map((c) => destChip(c.name, () => pickCategory(c))))}
         {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
+        {target.area !== "transfer" && section("Other", destChip("Transfer", () => pickArea("transfer")))}
         {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
       </div>
     </div>
   );
 }
 
-// Category modal (spec Alena 2026-07-28): rename + delete live here, not on
-// the row. Standard modal manners: backdrop click and Escape close, the name
-// field autofocuses, Enter saves, delete is two-step inside the modal.
-function CategoryModal({
-  cat, onClose, onRename, onDelete, busy, error,
+// Categories modal (Alena 2026-11-14, superseding the 2026-07-28 per-row
+// edit mode and its pencils): the Expenses card's Edit opens the whole
+// category list — every category, including ones with no spending this
+// month, which the card itself never shows. Add at the bottom, click a name
+// to rename, delete is two-step. Standard modal manners: backdrop click and
+// Escape close. The list is the server's (`categories` re-fetches after
+// every change), so what is on screen is what is saved.
+type Cat = { id: number; name: string; grp: "need" | "want" };
+
+function CategoriesModal({
+  categories, busy, error, onAdd, onRename, onDelete, onClose,
 }: {
-  cat: { id: number; name: string };
-  onClose: () => void;
-  onRename: (name: string) => void;
-  onDelete: () => void;
+  categories: Cat[];
   busy: boolean;
   error: string | null;
+  onAdd: (name: string, grp: "need" | "want") => Promise<boolean>;
+  onRename: (id: number, name: string) => void;
+  onDelete: (id: number) => void;
+  onClose: () => void;
 }) {
-  const [name, setName] = useState(cat.name);
-  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newGrp, setNewGrp] = useState<"need" | "want">("want");
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [armedId, setArmedId] = useState<number | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -473,7 +566,92 @@ function CategoryModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const dirty = name.trim() !== cat.name && name.trim().length > 0;
+  const canAdd = newName.trim().length > 0 && !busy;
+  const add = async () => {
+    if (!canAdd) return;
+    // keep the typed name when the server refuses it, so it can be fixed
+    if (await onAdd(newName.trim(), newGrp)) setNewName("");
+  };
+
+  const catRow = (c: Cat) => (
+    <div key={c.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+         onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+         onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}>
+      {renamingId === c.id ? (
+        <input
+          type="text"
+          autoFocus
+          defaultValue={c.name}
+          maxLength={40}
+          aria-label={`Rename ${c.name}`}
+          onBlur={() => setRenamingId(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              const v = (e.target as HTMLInputElement).value.trim();
+              setRenamingId(null);
+              if (v && v !== c.name) onRename(c.id, v);
+            }
+            if (e.key === "Escape") { e.stopPropagation(); setRenamingId(null); }
+          }}
+          className="min-w-0 flex-1 rounded-lg px-2 py-1 text-[13px]"
+          style={{ border: `1px solid ${MUTED}`, color: INK, background: CARD }}
+        />
+      ) : (
+        <button type="button" className="min-w-0 flex-1 truncate text-left text-[13px]"
+                style={{ color: INK, cursor: "pointer" }} title="Rename"
+                onClick={() => { setArmedId(null); setRenamingId(c.id); }}>
+          {c.name}
+        </button>
+      )}
+      <button
+        type="button"
+        className="shrink-0 rounded-full px-2.5 py-1 text-xs"
+        style={{
+          border: `1px solid ${LINE}`, cursor: busy ? "default" : "pointer",
+          color: armedId === c.id ? INK : MUTED, fontWeight: armedId === c.id ? 600 : 400,
+          background: armedId === c.id ? CARD : "transparent",
+        }}
+        disabled={busy}
+        aria-label={armedId === c.id ? `Confirm delete ${c.name}` : `Delete ${c.name}`}
+        onBlur={() => setArmedId((v) => (v === c.id ? null : v))}
+        onClick={() => {
+          if (armedId === c.id) { setArmedId(null); onDelete(c.id); }
+          else setArmedId(c.id);
+        }}
+      >
+        {armedId === c.id ? "Really delete?" : "Delete"}
+      </button>
+    </div>
+  );
+
+  const group = (label: string, grp: "need" | "want") => {
+    const rows = categories.filter((c) => c.grp === grp);
+    return (
+      <div className="mb-3">
+        <div className="mb-1 px-2 text-[11px]" style={{ textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, fontWeight: 600 }}>
+          {label}
+        </div>
+        {rows.length === 0
+          ? <div className="px-2 py-1.5 text-xs" style={{ color: MUTED }}>None yet.</div>
+          : rows.map(catRow)}
+      </div>
+    );
+  };
+
+  const grpChip = (label: string, grp: "need" | "want") => (
+    <button
+      type="button"
+      className="rounded-full px-2.5 py-1 text-xs"
+      aria-pressed={newGrp === grp}
+      style={{
+        border: `1px solid ${newGrp === grp ? INK : LINE}`, cursor: "pointer",
+        color: newGrp === grp ? INK : MUTED, fontWeight: newGrp === grp ? 600 : 400,
+      }}
+      onClick={() => setNewGrp(grp)}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div
@@ -484,57 +662,54 @@ function CategoryModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`Edit category ${cat.name}`}
-        className="w-[320px] rounded-2xl p-6"
+        aria-label="Categories"
+        className="flex max-h-[85vh] w-[380px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-[15px] font-bold" style={{ color: INK }}>Edit category</h2>
-          <button
-            type="button"
-            aria-label="Close"
-            style={{ color: MUTED, cursor: "pointer" }}
-            onClick={onClose}
-          ><X size={16} /></button>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="text-[15px] font-bold" style={{ color: INK }}>Categories</h2>
+          <button type="button" aria-label="Close" style={{ color: MUTED, cursor: "pointer" }} onClick={onClose}>
+            <X size={16} />
+          </button>
         </div>
-        <input
-          type="text"
-          autoFocus
-          value={name}
-          maxLength={40}
-          aria-label="Category name"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && dirty && !busy) onRename(name.trim()); }}
-          className="w-full rounded-lg px-3 py-2 text-sm"
-          style={{ border: `1px solid ${LINE}`, color: INK }}
-        />
-        {error && <div className="mt-2 text-xs" style={{ color: BAD }}>{error}</div>}
-        <button
-          type="button"
-          className="mt-4 w-full rounded-full py-2.5 text-[13px] font-semibold"
-          style={{
-            background: INK, color: "#fff",
-            cursor: dirty && !busy ? "pointer" : "default",
-            opacity: dirty && !busy ? 1 : 0.5,
-          }}
-          disabled={!dirty || busy}
-          onClick={() => onRename(name.trim())}
-        >
-          {busy ? "Saving…" : "Save"}
-        </button>
-        <button
-          type="button"
-          className="mt-2 w-full rounded-full py-2.5 text-[13px] font-semibold"
-          style={{
-            border: `1px solid ${deleteArmed ? BAD : LINE}`,
-            background: deleteArmed ? "#fdf3f2" : "transparent",
-            color: BAD, cursor: "pointer",
-          }}
-          disabled={busy}
-          onClick={() => (deleteArmed ? onDelete() : setDeleteArmed(true))}
-        >
-          {deleteArmed ? "Really delete? Transactions become Uncategorized" : "Delete category"}
-        </button>
+        <div className="mb-4 text-xs" style={{ color: MUTED }}>
+          Click a name to rename it. Deleting a category sends its transactions to Uncategorized.
+        </div>
+
+        <div className="-mx-2 min-h-0 flex-1 overflow-y-auto">
+          {group("Needs", "need")}
+          {group("Wants", "want")}
+        </div>
+
+        <div className="mt-3 border-t pt-4" style={{ borderColor: LINE }}>
+          <input
+            type="text"
+            value={newName}
+            maxLength={40}
+            placeholder="New category"
+            aria-label="New category name"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void add(); }}
+            className="w-full rounded-lg px-3 py-2 text-sm"
+            style={{ border: `1px solid ${LINE}`, color: INK, background: CARD }}
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex gap-1.5">
+              {grpChip("Needs", "need")}
+              {grpChip("Wants", "want")}
+            </div>
+            <button
+              type="button"
+              className="rounded-full px-4 py-1.5 text-[13px] font-semibold"
+              style={{ background: INK, color: CARD, cursor: canAdd ? "pointer" : "default", opacity: canAdd ? 1 : 0.5 }}
+              disabled={!canAdd}
+              onClick={() => void add()}
+            >
+              {busy ? "Saving…" : "Add"}
+            </button>
+          </div>
+          {error && <div role="alert" className="mt-2 text-xs" style={{ color: INK }}>{error}</div>}
+        </div>
       </div>
     </div>
   );
@@ -735,10 +910,14 @@ export default function BudgetView({
   const [gatedTxnCount, setGatedTxnCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  // Expenses-card edit mode (spec Alena 2026-07-28): in edit mode a category
-  // row opens the category modal, where rename and delete live.
-  const [editing, setEditing] = useState(false);
-  const [editCat, setEditCat] = useState<{ id: number; name: string } | null>(null);
+  // why the last date edit was refused, if it was — shown under the header
+  const [txnError, setTxnError] = useState<string | null>(null);
+  // Expenses card's Edit (Alena 2026-11-14): opens the categories modal —
+  // the full list, with add / rename / delete. catsChanged remembers that
+  // the list was edited, so closing the modal re-sorts transactions once.
+  const [catsOpen, setCatsOpen] = useState(false);
+  const catsChanged = useRef(false);
+  const [sortNote, setSortNote] = useState<string | null>(null);
   const [modalBusy, setModalBusy] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   // Savings-card edit mode: a destination row opens a modal that bulk-moves
@@ -765,8 +944,9 @@ export default function BudgetView({
     setPicker(null);
     setGatedTxnCount(0);
     setSyncError(null);
-    setEditing(false);
-    setEditCat(null);
+    setTxnError(null);
+    setCatsOpen(false);
+    setSortNote(null);
     setEditingSavings(false);
     setEditSaved(null);
     setAddKind(null);
@@ -847,10 +1027,11 @@ export default function BudgetView({
     [onLocked, loadMonth],
   );
 
-  // Category modal actions — rename (PATCH) and delete (DELETE). Both close
-  // the modal and re-fetch on success; errors render inside the modal.
-  const modalCall = useCallback(
-    async (method: "PATCH" | "DELETE", body: Record<string, unknown>) => {
+  // Categories modal actions — add (POST), rename (PATCH), delete (DELETE).
+  // Each re-fetches on success so the modal's list is the saved list;
+  // errors render inside the modal. Resolves true when the change landed.
+  const catCall = useCallback(
+    async (method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>): Promise<boolean> => {
       setModalBusy(true);
       setModalError(null);
       try {
@@ -860,22 +1041,57 @@ export default function BudgetView({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (res.status === 401) { onLocked(); return; }
+        if (res.status === 401) { onLocked(); return false; }
         const resBody = await res.json().catch(() => ({}));
         if (!res.ok) {
           setModalError(typeof resBody.error === "string" ? resBody.error : "Couldn't save");
-          return;
+          return false;
         }
-        setEditCat(null);
+        catsChanged.current = true;
         await loadMonth();
+        return true;
       } catch {
         setModalError("Couldn't reach the app server");
+        return false;
       } finally {
         setModalBusy(false);
       }
     },
     [onLocked, loadMonth],
   );
+
+  // Closing the categories modal after an edit re-sorts transactions against
+  // the new list: rules first, then the optional AI pass over whatever is
+  // still Uncategorized. One pass per editing session, not one per change.
+  const closeCats = useCallback(async () => {
+    setCatsOpen(false);
+    setModalError(null);
+    if (!catsChanged.current) return;
+    catsChanged.current = false;
+    setSortNote("Sorting transactions into your categories…");
+    try {
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sort" }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      const body = await res.json().catch(() => ({}));
+      await loadMonth();
+      const n = (body.byRules ?? 0) + (body.ai?.categorized ?? 0);
+      const status = body.ai?.status;
+      setSortNote(
+        !res.ok ? "Couldn't re-sort transactions — they stay where they are."
+        : status === "no-key" ? `Categories saved.${n > 0 ? ` ${n} transaction${n === 1 ? "" : "s"} sorted by your rules.` : ""} AI sorting is off (no API key).`
+        : status === "failed" || status === "refusal" ? "Categories saved. AI sorting didn't run this time — your rules still apply."
+        : n > 0 ? `Categories saved. ${n} transaction${n === 1 ? "" : "s"} sorted.`
+        : "Categories saved.",
+      );
+    } catch {
+      setSortNote("Couldn't re-sort transactions — they stay where they are.");
+    }
+  }, [onLocked, loadMonth]);
 
   // Bulk re-route for a savings destination: every transaction in the row
   // through the same PUT the single-txn popover uses. Sequential — the
@@ -956,6 +1172,30 @@ export default function BudgetView({
       });
       if (res.status === 401) { onLocked(); return; }
       if (res.ok) await loadMonth();
+    },
+    [onLocked, loadMonth],
+  );
+
+  // Re-date a transaction (the ⋯ menu's Month row). The server can refuse —
+  // an unsynced or imported month — and that reason has to reach the user,
+  // or the edit would just seem to do nothing.
+  const onSetTxnDate = useCallback(
+    async (id: number, date: string) => {
+      setOpenTxnMenu(null);
+      setTxnError(null);
+      const res = await fetch("/api/transactions", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "date", date }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setTxnError(typeof body.error === "string" ? body.error : "Couldn't change the date");
+        return;
+      }
+      await loadMonth();
     },
     [onLocked, loadMonth],
   );
@@ -1059,6 +1299,15 @@ export default function BudgetView({
     <div>
       {header}
 
+      {txnError && (
+        <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-xs"
+             style={{ background: SOFT, color: INK }}>
+          <span>{txnError}</span>
+          <button type="button" aria-label="Dismiss" style={{ color: MUTED, cursor: "pointer" }}
+                  onClick={() => setTxnError(null)}><X size={14} /></button>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-col gap-3 sm:flex-row">
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
@@ -1088,7 +1337,7 @@ export default function BudgetView({
                open={openRow === `i:${row.label}`}
                onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)}
                openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
         ))}
       </div>
 
@@ -1104,45 +1353,39 @@ export default function BudgetView({
               type="button"
               style={EDIT_BTN}
               {...editBtnHover}
-              onClick={() => { setEditing((v) => !v); setEditCat(null); setOpenRow(null); }}
+              aria-haspopup="dialog"
+              onClick={() => { setModalError(null); setSortNote(null); setCatsOpen(true); }}
             >
-              {editing ? "Done" : "Edit"}
+              Edit
             </button>
           </div>
         </div>
+        {sortNote && <div role="status" className="mb-3 text-xs" style={{ color: MUTED }}>{sortNote}</div>}
         {data.expenses.length === 0 && (
           <div className="py-3 text-sm" style={{ color: MUTED }}>No expenses this month.</div>
         )}
         {needsRows.length > 0 && (
           <>
             <div className="text-[11px] mt-0 mb-1" style={{ color: MUTED }}>NEEDS</div>
-            {needsRows.map((row) => {
-              const cat = data.categories.find((c) => c.name === row.label);
-              return (
-                <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
-                     open={openRow === `e:${row.label}`}
-                     onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                     openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
-                     onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
-              );
-            })}
+            {needsRows.map((row) => (
+              <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
+                   open={openRow === `e:${row.label}`}
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
+                   openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                   onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
+            ))}
           </>
         )}
         {wantsRows.length > 0 && (
           <>
             <div className={`text-[11px] mb-1 ${needsRows.length > 0 ? "mt-4" : "mt-0"}`} style={{ color: MUTED }}>WANTS</div>
-            {wantsRows.map((row) => {
-              const cat = data.categories.find((c) => c.name === row.label);
-              return (
-                <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
-                     open={openRow === `e:${row.label}`}
-                     onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
-                     openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
-                     onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
-              );
-            })}
+            {wantsRows.map((row) => (
+              <Row key={row.label} row={row} total={data.totalExpenses} valueColor={BAD} area="expense"
+                   open={openRow === `e:${row.label}`}
+                   onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
+                   openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                   onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
+            ))}
           </>
         )}
         {/* Disputed folder — negated charges stay visible for audit, no
@@ -1153,7 +1396,20 @@ export default function BudgetView({
                  open={openRow === "d:Disputed"}
                  onToggle={() => setOpenRow(openRow === "d:Disputed" ? null : "d:Disputed")}
                  openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
+          </div>
+        )}
+        {/* Transfer folder — everything set aside as a transfer: the
+            classifier's own (card payments, own-account moves, ATM/cash
+            withdrawals) plus the user's moves. Visible so each can be
+            re-filed, counted in no total (Alena 2026-11-14) */}
+        {data.transfers && (
+          <div className={needsRows.length > 0 || wantsRows.length > 0 || data.disputed ? "mt-4" : "mt-0"}>
+            <Row row={data.transfers} total={data.totalExpenses} valueColor={MUTED} area="transfer"
+                 open={openRow === "t:Transfer"}
+                 onToggle={() => setOpenRow(openRow === "t:Transfer" ? null : "t:Transfer")}
+                 openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
           </div>
         )}
       </div>
@@ -1198,7 +1454,7 @@ export default function BudgetView({
                open={openRow === `s:${row.label}`}
                onToggle={() => setOpenRow(openRow === `s:${row.label}` ? null : `s:${row.label}`)}
                openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-               onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate}
                onEdit={editingSavings ? () => setEditSaved(row) : undefined} />
         ))}
       </div>
@@ -1224,15 +1480,15 @@ export default function BudgetView({
           onClose={() => setPicker(null)}
         />
       )}
-      {editCat && (
-        <CategoryModal
-          key={editCat.id}
-          cat={editCat}
+      {catsOpen && (
+        <CategoriesModal
+          categories={data.categories}
           busy={modalBusy}
           error={modalError}
-          onClose={() => setEditCat(null)}
-          onRename={(name) => modalCall("PATCH", { id: editCat.id, name })}
-          onDelete={() => modalCall("DELETE", { id: editCat.id })}
+          onClose={() => void closeCats()}
+          onAdd={(name, grp) => catCall("POST", { action: "add", name, grp })}
+          onRename={(id, name) => void catCall("PATCH", { id, name })}
+          onDelete={(id) => void catCall("DELETE", { id })}
         />
       )}
       {editSaved && (

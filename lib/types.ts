@@ -47,6 +47,7 @@ export interface CashflowTxn {
   label: string;   // merchant if set, else name
   value: number;   // display sign: positive dollars for both income and expenses
   account: string; // source account, 'Chase Checking ···1187' — '' when unknown
+  bankDate?: string; // set only when the user re-dated the row: the bank's own date
 }
 
 export interface CashflowRow {
@@ -71,6 +72,7 @@ export interface CashflowData {
   savedRows: CashflowRow[]; // txn_class='saved' — income that became investments
   totalSaved: number;       // sum of savedRows (≠ `saved`, the leftover)
   disputed: CashflowRow | null; // txn_class='excluded' — the Disputed folder at the bottom of Expenses
+  transfers: CashflowRow | null; // txn_class 'transfer_manual' + benched 'transfer' — the Transfer folder under Disputed
   categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
   txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }
