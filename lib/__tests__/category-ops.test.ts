@@ -325,7 +325,7 @@ describe("updateCategory", () => {
     expect(rowOf(id)).toEqual({ name: "Groceries", icon: null });
   });
 
-  it("rolls the icon back when the name is refused, and rejects an empty patch", () => {
+  it("writes no icon when the name is refused, and rejects an empty patch", () => {
     const id = idOf(d, "Groceries");
     expect(() => updateCategory(d, id, { name: "Insurance", icon: "heart" })).toThrow(/already exists/);
     expect(() => updateCategory(d, id, {})).toThrow(/nothing to change/);
