@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import {
-  addCategory, renameCategory, setCategoryIcon, deleteCategory, seedDefaultCategories, uncategorizeTxn, CategoryError,
+  addCategory, renameCategory, setCategoryIcon, updateCategory, deleteCategory, seedDefaultCategories, uncategorizeTxn, CategoryError,
 } from "../category-ops";
 import { categorizeTransactions, cashflowView } from "../derive";
 import { guessCategoryIcon, isCategoryIconKey, CATEGORY_ICON_KEYS, CATEGORY_ICON_LABELS } from "../category-icons";
@@ -265,13 +265,31 @@ describe("category icons", () => {
     expect(iconOf("Car Insurance")).toBe("car");
   });
 
-  it("guesses the same icons the built-in categories always had", () => {
-    expect(guessCategoryIcon("Rent / Housing")).toBe("housing");
-    expect(guessCategoryIcon("Car Mainten.")).toBe("repair");
-    expect(guessCategoryIcon("Car Gas")).toBe("fuel");
-    expect(guessCategoryIcon("Misc. / Maint / Home")).toBe("home");
-    expect(guessCategoryIcon("Car Payment")).toBe("car");
+  // Parity: every default except Business Expense draws the icon it drew
+  // before icons were editable.
+  it("guesses the long-standing icon for each default category", () => {
+    const expected: Record<string, string> = {
+      "Rent / Housing": "housing", "Utilities": "utilities", "Phone / Internet": "internet",
+      "Insurance": "insurance", "Medical / Health": "health", "Apps / Subs": "apps",
+      "Groceries": "groceries", "Eat Out": "dining", "Events / Ent.": "events",
+      "Car Mainten.": "repair", "Misc. / Maint / Home": "home", "Pets": "pets",
+      "Gifts": "gifts", "Car Gas": "fuel", "Travel / Parking": "travel",
+      "Shopping / Personal": "shopping", "Education / Training": "education",
+      "Interest Fees / Violations": "fees",
+    };
+    for (const [name, icon] of Object.entries(expected)) expect([name, guessCategoryIcon(name)]).toEqual([name, icon]);
+  });
+
+  it("guesses the icons added with editable icons, without a longer word hijacking them", () => {
     expect(guessCategoryIcon("Business Expense")).toBe("business");
+    expect(guessCategoryIcon("Car Payment")).toBe("car");       // was the events ticket: "paymENT"
+    expect(guessCategoryIcon("Car Rental")).toBe("car");        // not housing: "RENTal"
+    expect(guessCategoryIcon("Coffee")).toBe("coffee");         // not fees: "cofFEE"
+    expect(guessCategoryIcon("Coffee Shops")).toBe("coffee");
+    expect(guessCategoryIcon("Gym")).toBe("fitness");
+    expect(guessCategoryIcon("Kids")).toBe("kids");
+    expect(guessCategoryIcon("AUTOMATIC SAVINGS TRANSFER")).toBeNull(); // a savings label, not a car
+    expect(guessCategoryIcon("Bank Fees")).toBe("fees");
     expect(guessCategoryIcon("Zzz")).toBeNull();
   });
 
@@ -279,5 +297,38 @@ describe("category icons", () => {
     for (const k of CATEGORY_ICON_KEYS) expect(CATEGORY_ICON_LABELS[k]).toBeTruthy();
     expect(isCategoryIconKey("tag")).toBe(true);
     expect(isCategoryIconKey("uncategorized")).toBe(false);
+  });
+});
+
+describe("updateCategory", () => {
+  let d: Database.Database;
+  beforeEach(() => { d = makeDb(); });
+  const rowOf = (id: number) =>
+    d.prepare(`SELECT name, icon FROM categories WHERE id = ?`).get(id) as { name: string; icon: string | null };
+
+  it("applies a name and an icon together", () => {
+    const id = idOf(d, "Groceries");
+    updateCategory(d, id, { name: "Food Shop", icon: "coffee" });
+    expect(rowOf(id)).toEqual({ name: "Food Shop", icon: "coffee" });
+  });
+
+  it("applies an icon alone, and a name alone", () => {
+    const id = idOf(d, "Groceries");
+    updateCategory(d, id, { icon: "heart" });
+    updateCategory(d, id, { name: "Food" });
+    expect(rowOf(id)).toEqual({ name: "Food", icon: "heart" });
+  });
+
+  it("rolls the rename back when the icon is refused", () => {
+    const id = idOf(d, "Groceries");
+    expect(() => updateCategory(d, id, { name: "Nope", icon: "rocket" })).toThrow(CategoryError);
+    expect(rowOf(id)).toEqual({ name: "Groceries", icon: null });
+  });
+
+  it("rolls the icon back when the name is refused, and rejects an empty patch", () => {
+    const id = idOf(d, "Groceries");
+    expect(() => updateCategory(d, id, { name: "Insurance", icon: "heart" })).toThrow(/already exists/);
+    expect(() => updateCategory(d, id, {})).toThrow(/nothing to change/);
+    expect(rowOf(id)).toEqual({ name: "Groceries", icon: null });
   });
 });

@@ -586,7 +586,11 @@ function TxnPickerModal({
 type Cat = { id: number; name: string; grp: CategoryGroup; icon: string | null };
 
 // The pencil's editor for one category: its name and its icon, saved
-// together. Only what changed is sent.
+// together. Only what changed is sent — with one rule on top: a category
+// with no chosen icon shows a keyword guess, and that guess follows the
+// name. So a rename pins whatever icon is highlighted, or the row would
+// re-guess from the new name and save an icon the user never saw. Clicking
+// a tile (even the highlighted one) pins it too.
 function CategoryEditor({
   cat, busy, onSave, onCancel,
 }: {
@@ -598,16 +602,22 @@ function CategoryEditor({
   const shown = categoryIconKey(cat.name, cat.icon);
   const [name, setName] = useState(cat.name);
   const [icon, setIcon] = useState<CategoryIconKey>(shown);
+  const [picked, setPicked] = useState(false);
   const trimmed = name.trim();
   const nameChanged = trimmed.length > 0 && trimmed !== cat.name;
-  const iconChanged = icon !== shown;
-  const dirty = nameChanged || iconChanged;
+  const iconChanged = icon !== cat.icon && (picked || (nameChanged && !cat.icon));
+  const canSave = (nameChanged || iconChanged) && trimmed.length > 0 && !busy;
   const save = () => {
-    if (!dirty || busy || trimmed.length === 0) return;
+    if (!canSave) return;
     onSave({ ...(nameChanged ? { name: trimmed } : {}), ...(iconChanged ? { icon } : {}) });
   };
   return (
-    <div className="mx-2 mb-2 rounded-xl p-3" style={{ border: `1px solid ${LINE}` }}>
+    <div
+      className="mx-2 mb-2 rounded-xl p-3"
+      style={{ border: `1px solid ${LINE}` }}
+      // Escape anywhere in the editor cancels the editor, not the whole modal
+      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); if (!busy) onCancel(); } }}
+    >
       <input
         type="text"
         autoFocus
@@ -615,10 +625,7 @@ function CategoryEditor({
         maxLength={40}
         aria-label={`Name for ${cat.name}`}
         onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") save();
-          if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
-        }}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); }}
         className="w-full rounded-lg px-2 py-1.5 text-[13px]"
         style={{ border: `1px solid ${LINE}`, color: INK, background: CARD }}
       />
@@ -636,7 +643,7 @@ function CategoryEditor({
               width: 32, height: 32, borderRadius: "50%", cursor: "pointer",
               background: icon === k ? INK : SOFT, color: icon === k ? CARD : MUTED,
             }}
-            onClick={() => setIcon(k)}
+            onClick={() => { setIcon(k); setPicked(true); }}
           >
             {createElement(CATEGORY_ICON_GLYPHS[k], { size: 15 })}
           </button>
@@ -644,11 +651,12 @@ function CategoryEditor({
       </div>
       <div className="mt-3 flex justify-end gap-2">
         <button type="button" className="rounded-full px-3 py-1 text-xs"
-                style={{ border: `1px solid ${LINE}`, color: MUTED, cursor: "pointer" }}
+                style={{ border: `1px solid ${LINE}`, color: MUTED, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1 }}
+                disabled={busy}
                 onClick={onCancel}>Cancel</button>
         <button type="button" className="rounded-full px-3 py-1 text-xs font-semibold"
-                style={{ background: INK, color: CARD, cursor: dirty && !busy ? "pointer" : "default", opacity: dirty && !busy ? 1 : 0.5 }}
-                disabled={!dirty || busy}
+                style={{ background: INK, color: CARD, cursor: canSave ? "pointer" : "default", opacity: canSave ? 1 : 0.5 }}
+                disabled={!canSave}
                 onClick={save}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </div>
@@ -671,11 +679,18 @@ function CategoriesModal({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [armedId, setArmedId] = useState<number | null>(null);
 
+  // Escape closes the open editor first, the modal only when none is open.
+  // Handled here as well as on the editor itself: a clicked icon tile does
+  // not take keyboard focus in every browser (Safari), so the key can arrive
+  // at the document with the editor's own handler never seeing it.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (editingId !== null) { if (!busy) setEditingId(null); } else onClose();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, editingId, busy]);
 
   const canAdd = newName.trim().length > 0 && !busy;
   const add = async () => {
@@ -699,9 +714,10 @@ function CategoriesModal({
           className="flex shrink-0 items-center justify-center rounded-full"
           style={{
             width: 26, height: 26, border: `1px solid ${editingId === c.id ? INK : LINE}`,
-            color: editingId === c.id ? INK : MUTED, cursor: "pointer",
+            color: editingId === c.id ? INK : MUTED, cursor: busy ? "default" : "pointer",
             background: editingId === c.id ? CARD : "transparent",
           }}
+          disabled={busy}
           aria-label={`Edit ${c.name}`}
           aria-expanded={editingId === c.id}
           title="Edit name and icon"
@@ -721,7 +737,7 @@ function CategoriesModal({
           aria-label={armedId === c.id ? `Confirm delete ${c.name}` : `Delete ${c.name}`}
           onBlur={() => setArmedId((v) => (v === c.id ? null : v))}
           onClick={() => {
-            if (armedId === c.id) { setArmedId(null); setEditingId(null); onDelete(c.id); }
+            if (armedId === c.id) { setArmedId(null); setEditingId((v) => (v === c.id ? null : v)); onDelete(c.id); }
             else setArmedId(c.id);
           }}
         >
@@ -735,7 +751,7 @@ function CategoriesModal({
           busy={busy}
           onCancel={() => setEditingId(null)}
           // stays open when the server refuses (a name clash) so it can be fixed
-          onSave={async (patch) => { if (await onEdit(c.id, patch)) setEditingId(null); }}
+          onSave={async (patch) => { if (await onEdit(c.id, patch)) setEditingId((v) => (v === c.id ? null : v)); }}
         />
       )}
     </div>
@@ -1033,7 +1049,7 @@ export default function BudgetView({
   // why the last date edit was refused, if it was — shown under the header
   const [txnError, setTxnError] = useState<string | null>(null);
   // Expenses card's Edit (Alena 2026-11-14): opens the categories modal —
-  // the full list, with add / rename / delete. catsChanged remembers that
+  // the full list, with add / edit (name, icon) / delete. catsChanged remembers that
   // the list was edited, so closing the modal re-sorts transactions once.
   const [catsOpen, setCatsOpen] = useState(false);
   const catsChanged = useRef(false);
@@ -1147,9 +1163,11 @@ export default function BudgetView({
     [onLocked, loadMonth],
   );
 
-  // Categories modal actions — add (POST), rename (PATCH), delete (DELETE).
-  // Each re-fetches on success so the modal's list is the saved list;
-  // errors render inside the modal. Resolves true when the change landed.
+  // Categories modal actions — add (POST), edit name and/or icon (PATCH),
+  // delete (DELETE). Each re-fetches on success so the modal's list is the
+  // saved list; errors render inside the modal. Resolves true when the
+  // change landed. An icon-only edit can't affect which transactions land
+  // where, so it doesn't ask for a re-sort on close.
   const catCall = useCallback(
     async (method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>): Promise<boolean> => {
       setModalBusy(true);
@@ -1167,7 +1185,7 @@ export default function BudgetView({
           setModalError(typeof resBody.error === "string" ? resBody.error : "Couldn't save");
           return false;
         }
-        catsChanged.current = true;
+        if (!(method === "PATCH" && !("name" in body))) catsChanged.current = true;
         await loadMonth();
         return true;
       } catch {

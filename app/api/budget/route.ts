@@ -67,8 +67,14 @@ function buildCashflowData(month: string): CashflowData {
     }
   }
 
-  const noTxns = (r: { label: string; value: number }, grp?: CategoryGroup): CashflowRow =>
-    ({ ...r, txns: [], ...(grp ? { grp } : {}) });
+  // Stored rows are labelled with category names but not joined to the
+  // categories table — look the chosen icon up by name so a category shows
+  // the same icon on a stored month as on a derived one.
+  const iconByName = new Map(categories.filter((c) => c.icon).map((c) => [c.name, c.icon as string]));
+  const noTxns = (r: { label: string; value: number }, grp?: CategoryGroup): CashflowRow => {
+    const icon = grp ? iconByName.get(r.label) : undefined;
+    return { ...r, txns: [], ...(grp ? { grp } : {}), ...(icon ? { icon } : {}) };
+  };
   const income = (JSON.parse(row.income_json) as { label: string; value: number }[]).map((r) => noTxns(r));
   const fixed = (
     d.prepare(`SELECT label, amount FROM budget_fixed_items WHERE month = ? ORDER BY sort ASC`)

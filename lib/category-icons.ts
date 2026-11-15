@@ -1,8 +1,10 @@
 // Category icon vocabulary (Alena 2026-11-14: "icons can be edited too").
 // A category's icon is one of these keys, stored in categories.icon. NULL
-// means "not chosen" — the row falls back to guessCategoryIcon, the keyword
-// match every category used before icons were editable, so nothing changes
-// for a category nobody has touched.
+// means "not chosen" — the row falls back to guessCategoryIcon, a keyword
+// match on the label. That guess is the one categories used before icons
+// were editable, plus a few rules added with this file (business, car,
+// coffee, fitness, kids) and one fixed (see "events" below) — so a handful
+// of untouched labels now draw a better icon than the plain tag.
 // Pure data (no React), same split as lib/asset-icons: the route validates
 // against it, the glyphs live in components/views/budget.tsx.
 
@@ -33,8 +35,11 @@ export function isCategoryIconKey(v: unknown): v is CategoryIconKey {
 
 // First match wins — order matters ("car mainten." is a repair, not a car;
 // "misc. / maint / home" is the home bucket only after repair had its turn).
+// Short stems are word-bounded where a longer word would hijack them:
+// "cofFEE", "car RENTal", "AUTOmatic", "payMENT".
 const KEYWORDS: [RegExp, CategoryIconKey][] = [
-  [/rent|housing|mortgage|apartment/i, "housing"],
+  [/coffee|cafe/i, "coffee"],
+  [/\brent\b|housing|mortgage|apartment/i, "housing"],
   [/utilit|electric|power/i, "utilities"],
   [/phone|internet|wifi/i, "internet"],
   [/insurance/i, "insurance"],
@@ -51,14 +56,13 @@ const KEYWORDS: [RegExp, CategoryIconKey][] = [
   [/travel|parking|flight|hotel/i, "travel"],
   [/shop|personal/i, "shopping"],
   [/education|training|course|school/i, "education"],
-  [/interest|fee|violation/i, "fees"],
+  [/interest|\bfees?\b|violation/i, "fees"],
   [/crypto|coin|bitcoin/i, "crypto"],
   [/home|house|misc|maint/i, "home"],
-  [/business/i, "business"],
-  [/\bcar\b|auto|vehicle/i, "car"],
-  [/coffee|cafe/i, "coffee"],
-  [/gym|fitness/i, "fitness"],
-  [/kid|child|baby/i, "kids"],
+  [/\bbusiness\b/i, "business"],
+  [/\bcar\b|\bauto\b|vehicle/i, "car"],
+  [/\bgym\b|fitness/i, "fitness"],
+  [/\bkids?\b|child|baby/i, "kids"],
 ];
 
 /** Keyword guess for a label with no chosen icon; null when nothing fits
