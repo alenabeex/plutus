@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import { db } from "./db";
-import type { CashflowRow } from "./types";
+import type { CashflowRow, CashflowTxn } from "./types";
 
 // Derivation layer: linked-connection data → the three views.
 // - Net worth: already derived (accounts+balances → latestBalances).
@@ -358,13 +358,36 @@ export function categorizeTransactions(d: Database.Database = db()): number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** The Cash Flow month a transaction is filed under: its cashflow_month
- *  override when the user moved it (lib/move-txn-month), else the month of
- *  its date. Every month-scoped Cash Flow query goes through this — never a
- *  raw `date LIKE` — so a moved transaction leaves one month and lands in
- *  the other everywhere at once. Unqualified column names: usable in a
- *  single-table query as is; joined queries spell it out with their alias. */
-export const TXN_MONTH_SQL = `COALESCE(cashflow_month, substr(date, 1, 7))`;
+/** The date a transaction counts under in Cash Flow: the user's
+ *  date_override when they edited it (lib/set-txn-date), else the bank's
+ *  date. TXN_MONTH_SQL is that date's month. Every month-scoped Cash Flow
+ *  query goes through these — never a raw `date LIKE` — so a re-dated
+ *  transaction leaves one month and lands in the other everywhere at once.
+ *  Unqualified column names: usable in a single-table query as is; joined
+ *  queries spell it out with their alias. */
+export const TXN_DATE_SQL = `COALESCE(date_override, date)`;
+export const TXN_MONTH_SQL = `substr(${TXN_DATE_SQL}, 1, 7)`;
+
+/** A budget_months row with no stored numbers — a month that only ever
+ *  existed to be derived from transactions. */
+export function storedMonthIsEmpty(
+  row: { total_income?: number | null; total_fixed?: number | null; total_variable?: number | null },
+): boolean {
+  return !row.total_income && !row.total_fixed && !row.total_variable;
+}
+
+/** Whether a non-sheet month renders the live, transaction-derived view.
+ *  Counted rows always do. A month whose only rows sit in the Transfer or
+ *  Disputed folders does too — otherwise moving a month's last transaction
+ *  into a folder would drop the folder itself and strand the row — unless
+ *  the month still carries stored numbers, which the live view would hide. */
+export function monthShowsDerived(
+  v: Pick<DerivedCashflowView, "txnCount" | "transfers" | "disputed">,
+  stored: Parameters<typeof storedMonthIsEmpty>[0],
+): boolean {
+  if (v.txnCount > 0) return true;
+  return storedMonthIsEmpty(stored) && (v.transfers !== null || v.disputed !== null);
+}
 
 /** Months materialize from transaction dates (plan T4.4), but ONLY the
  *  current month auto-materializes (spec 2026-07-28). Deep backfill (730-day
@@ -461,22 +484,26 @@ export interface DerivedCashflowView {
  *  CATEGORY (merchants live inside each row's txns), income grouped by payer,
  *  needs/wants totals split by categories.grp for the allocation bar.
  *  Plaid sign convention: positive = money out; display values are positive
- *  on both sides. Machine-classified transfers and pending rows never reach
- *  this query; the month is the filed month (TXN_MONTH_SQL), not the date. */
+ *  on both sides. Pending rows never reach this query; the classifier's
+ *  'transfer' rows do, and land in the Transfer folder unless their account
+ *  is outside cash flow. Dates and the month filter are the effective date
+ *  (TXN_DATE_SQL), not necessarily the bank's. */
 export function cashflowView(month: string, d: Database.Database = db()): DerivedCashflowView {
   const rows = d.prepare(
-    `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
+    `SELECT t.id, COALESCE(t.date_override, t.date) date,
+            CASE WHEN t.date_override IS NOT NULL THEN t.date END bank_date,
+            COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
             t.amount, t.txn_class, c.name cat, c.grp,
             COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct, a.mask,
             a.kind, a.institution, a.name acct_name, a.cashflow_role
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      LEFT JOIN accounts a ON a.id = t.account_id
-     WHERE t.pending = 0 AND COALESCE(t.cashflow_month, substr(t.date, 1, 7)) = ?
+     WHERE t.pending = 0 AND substr(COALESCE(t.date_override, t.date), 1, 7) = ?
        AND t.txn_class IN ('income', 'expense', 'saved', 'excluded', 'transfer_manual', 'transfer')
-     ORDER BY t.date DESC, t.id DESC`,
+     ORDER BY COALESCE(t.date_override, t.date) DESC, t.id DESC`,
   ).all(month) as {
-    id: number; date: string; label: string; amount: number;
+    id: number; date: string; bank_date: string | null; label: string; amount: number;
     txn_class: "income" | "expense" | "saved" | "excluded" | "transfer_manual" | "transfer";
     cat: string | null; grp: string | null;
     acct: string | null; mask: string | null;
@@ -500,17 +527,26 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   // 'transfer_manual' — NOT the classifier's 'transfer' — so
   // classifyTransactions' legacy upgrade passes, which re-decide 'transfer'
   // rows by fingerprint, can never undo the user.
-  // Money moved between own accounts has no direction: absolute dollars.
+  // Money moved between own accounts has no direction: absolute dollars per
+  // row. The header is the larger of money-out and money-in, not their sum:
+  // a card payment between two linked accounts arrives as two legs, and
+  // summing both would show twice what actually moved.
   const transferTxns: CashflowRow["txns"] = [];
-  let transferTotal = 0;
+  let transferOut = 0;
+  let transferIn = 0;
   let totalNeeds = 0;
 
   for (const r of rows) {
     // Source account for the drill-down row: nickname/name + masked digits.
     // Empty for manual txns with no account — the view skips the segment.
     const account = r.acct ? `${r.acct}${r.mask ? ` ···${r.mask}` : ""}` : "";
+    // bankDate only when the user re-dated the row — lets the UI offer a reset
+    const txn = (value: number): CashflowTxn => ({
+      id: r.id, date: r.date, label: r.label, value, account,
+      ...(r.bank_date ? { bankDate: r.bank_date } : {}),
+    });
     if (r.txn_class === "excluded") {
-      disputedTxns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount), account });
+      disputedTxns.push(txn(round2(r.amount)));
       disputedTotal = round2(disputedTotal + r.amount);
       continue;
     }
@@ -518,15 +554,15 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       kind: r.kind, institution: r.institution, name: r.acct_name ?? "", cashflow_role: r.cashflow_role,
     }) === "exclude") continue;
     if (r.txn_class === "transfer_manual" || r.txn_class === "transfer") {
-      const v = round2(Math.abs(r.amount));
-      transferTxns.push({ id: r.id, date: r.date, label: r.label, value: v, account });
-      transferTotal = round2(transferTotal + v);
+      transferTxns.push(txn(round2(Math.abs(r.amount))));
+      if (r.amount > 0) transferOut = round2(transferOut + r.amount);
+      else transferIn = round2(transferIn - r.amount);
       continue;
     }
     if (r.txn_class === "income") {
       const row = incomeBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
       row.value = round2(row.value + -r.amount);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(-r.amount), account });
+      row.txns.push(txn(round2(-r.amount)));
       incomeBy.set(r.label, row);
     } else if (r.txn_class === "saved") {
       // grouped by destination (merchant/name). Sign-agnostic on purpose:
@@ -535,13 +571,13 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       const v = round2(Math.abs(r.amount));
       const row = savedBy.get(r.label) ?? { label: r.label, value: 0, txns: [] };
       row.value = round2(row.value + v);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: v, account });
+      row.txns.push(txn(v));
       savedBy.set(r.label, row);
     } else {
       const key = r.cat ?? "Uncategorized";
       const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp: r.grp === "need" ? "need" : "want" };
       row.value = round2(row.value + r.amount);
-      row.txns.push({ id: r.id, date: r.date, label: r.label, value: round2(r.amount), account });
+      row.txns.push(txn(round2(r.amount)));
       expenseBy.set(key, row);
       if (r.grp === "need") totalNeeds = round2(totalNeeds + r.amount);
     }
@@ -562,7 +598,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       ? { label: "Disputed", value: disputedTotal, txns: disputedTxns }
       : null,
     transfers: transferTxns.length > 0
-      ? { label: "Transfer", value: transferTotal, txns: transferTxns }
+      ? { label: "Transfer", value: Math.max(transferOut, transferIn), txns: transferTxns }
       : null,
     // active classes only — disputed/transfers must not make an otherwise-
     // empty month look like it has cash flow

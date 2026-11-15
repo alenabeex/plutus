@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { addManualTxn, ManualTxnError, type ManualTxnInput } from "@/lib/add-manual-txn";
-import { moveTxnMonth, MoveMonthError } from "@/lib/move-txn-month";
+import { setTxnDate, TxnDateError } from "@/lib/set-txn-date";
 import { isValidMonthKey } from "@/lib/format";
 
 export const runtime = "nodejs";
@@ -27,8 +27,9 @@ export const runtime = "nodejs";
 //    Transfer folder under Disputed — own-account money the classifier
 //    took for income or spending; stored as 'transfer_manual', never the
 //    classifier's 'transfer', whose legacy upgrade passes would re-decide it.
-//  - "month": file the transaction under a different Cash Flow month than
-//    its date (lib/move-txn-month — the tested seam). The date is untouched.
+//  - "date": re-date the transaction so it counts as an entry for that
+//    date's month (lib/set-txn-date — the tested seam). The bank's date is
+//    untouched; setting it back to the bank date clears the edit.
 //  - "rename": override the transaction's display label. Writes `merchant`
 //    (the display COALESCE prefers it), so future rule-learning keys on the
 //    name the user actually recognizes.
@@ -36,7 +37,7 @@ type Body =
   | { id: number; action: "category"; categoryId: number }
   | { id: number; action: "dispute" }
   | { id: number; action: "move"; to: "income" | "saved" | "expense" | "disputed" | "transfer"; categoryId?: number }
-  | { id: number; action: "month"; month: string }
+  | { id: number; action: "date"; date: string }
   | { id: number; action: "rename"; label: string };
 
 export const PUT = withJsonErrors(async (req: NextRequest) => {
@@ -94,10 +95,12 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
       return NextResponse.json({ ok: false, error: "bad destination" }, { status: 400 });
     }
     if (to === "disputed") {
-      // keep category_id — un-disputing back to expense restores it
+      // keep category_id: the row leaves Cash Flow, it isn't re-categorized.
+      // (The picker always sends a categoryId on the way back, so the kept
+      // one only matters to a caller that moves to expense without one.)
       d.prepare(`UPDATE transactions SET txn_class = 'excluded' WHERE id = ?`).run(body.id);
     } else if (to === "transfer") {
-      // same as disputed: keep category_id so moving back to expense restores it
+      // same as disputed: category_id is left as it was
       d.prepare(`UPDATE transactions SET txn_class = 'transfer_manual' WHERE id = ?`).run(body.id);
     } else if (to === "expense") {
       const categoryId = (body as { categoryId?: number }).categoryId;
@@ -119,11 +122,11 @@ export const PUT = withJsonErrors(async (req: NextRequest) => {
     return withRefreshedSession(req, { ok: true });
   }
 
-  if (body.action === "month") {
+  if (body.action === "date") {
     try {
-      moveTxnMonth(d, body.id, (body as { month?: unknown }).month);
+      setTxnDate(d, body.id, (body as { date?: unknown }).date);
     } catch (e) {
-      if (e instanceof MoveMonthError) {
+      if (e instanceof TxnDateError) {
         return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
       }
       throw e;

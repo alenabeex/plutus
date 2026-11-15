@@ -47,6 +47,7 @@ export interface CashflowTxn {
   label: string;   // merchant if set, else name
   value: number;   // display sign: positive dollars for both income and expenses
   account: string; // source account, 'Chase Checking ···1187' — '' when unknown
+  bankDate?: string; // set only when the user re-dated the row: the bank's own date
 }
 
 export interface CashflowRow {

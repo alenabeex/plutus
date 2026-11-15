@@ -142,10 +142,19 @@ function migrate(d: Database.Database) {
   );
   if (!txnCols.has("txn_class")) d.exec(`ALTER TABLE transactions ADD COLUMN txn_class TEXT`);
   if (!txnCols.has("pfc")) d.exec(`ALTER TABLE transactions ADD COLUMN pfc TEXT`);
-  // Month override (2026-11-14): 'YYYY-MM' when the user filed a transaction
-  // under a different Cash Flow month than its date; NULL = month of date.
-  // Read through TXN_MONTH_SQL (lib/derive), written by lib/move-txn-month.
-  if (!txnCols.has("cashflow_month")) d.exec(`ALTER TABLE transactions ADD COLUMN cashflow_month TEXT`);
+  // Date override (2026-11-14): 'YYYY-MM-DD' when the user re-dated a
+  // transaction so it counts under another day/month; NULL = the bank's
+  // date. `date` itself stays Plaid's — sync rewrites it. Read through
+  // TXN_DATE_SQL / TXN_MONTH_SQL (lib/derive), written by lib/set-txn-date.
+  if (!txnCols.has("date_override")) d.exec(`ALTER TABLE transactions ADD COLUMN date_override TEXT`);
+  // cashflow_month was this column's month-only predecessor. It never
+  // reached main, but a dev database that ran that branch has it: carry any
+  // value over as the 1st of that month, then drop the column.
+  if (txnCols.has("cashflow_month")) {
+    d.exec(`UPDATE transactions SET date_override = cashflow_month || '-01'
+            WHERE cashflow_month IS NOT NULL AND date_override IS NULL`);
+    d.exec(`ALTER TABLE transactions DROP COLUMN cashflow_month`);
+  }
   const catCols = new Set(
     (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
   );

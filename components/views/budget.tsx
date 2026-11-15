@@ -80,11 +80,10 @@ export type CashflowArea = "income" | "expense" | "saved" | "disputed" | "transf
 export interface TxnActionOpts {
   categoryId?: number;
   to?: CashflowArea;
-  month?: string; // 'YYYY-MM' — the "month" action's destination
 }
 export type OnTxnAction = (
   id: number,
-  action: "category" | "move" | "month",
+  action: "category" | "move",
   opts?: TxnActionOpts,
 ) => void;
 
@@ -114,22 +113,28 @@ function areaLabel(area: CashflowArea, rowLabel: string): string {
     : rowLabel;
 }
 
-/** 'YYYY-MM' shifted by whole months. */
-function shiftMonth(month: string, delta: number): string {
-  const [y, m] = month.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
+/** Last day of the user's current month, 'YYYY-MM-DD' — the date editor's
+ *  ceiling. Local time on purpose: the page's month cap is the local month
+ *  (app/page.tsx), and the server allows for the UTC offset. */
+function localMonthEnd(): string {
+  const now = new Date();
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${last.getFullYear()}-${p(last.getMonth() + 1)}-${p(last.getDate())}`;
 }
 
 // Actions popover for one transaction — anchored to its own ⋯ button so
 // each txn row owns its outside-click-close listener independently (same
 // idiom as the header's Export popover / plusRef, just one instance per
-// row instead of one for the whole view). One line (spec Alena 2026-07-29):
-// [Rename] [current-location ▾]. Rename swaps the line for an input; the
-// pill opens the TxnPickerModal — destinations live in their own modal,
-// grouped Income / Needs / Wants / Savings / Disputed, not inline here.
+// row instead of one for the whole view). Three rows: Rename · Category ·
+// Month (Alena 2026-11-14). Rename swaps the rows for an input; Category
+// opens the TxnPickerModal — destinations live in their own modal, grouped
+// Income / Needs / Wants / Savings / Other / Disputed, not inline here;
+// Month swaps the rows for a date editor — the transaction counts as an
+// entry for whatever month that date falls in.
 function TxnRow({
   t, rowLabel, area, isOpen,
-  onToggle, onClose, onOpenPicker, onRename,
+  onToggle, onClose, onOpenPicker, onRename, onSetDate,
 }: {
   t: CashflowTxn;
   rowLabel: string;
@@ -139,9 +144,17 @@ function TxnRow({
   onClose: () => void;
   onOpenPicker: () => void;
   onRename: (label: string) => void;
+  onSetDate: (date: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
+  const [dating, setDating] = useState(false);
+  const [dateDraft, setDateDraft] = useState(t.date);
+  const saveDate = (date: string) => {
+    if (!date || date === t.date) { setDating(false); return; }
+    onClose();
+    onSetDate(date);
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -161,6 +174,7 @@ function TxnRow({
 
   // popover closed → next open starts on the action rows, not a stale input
   if (!isOpen && renaming) setRenaming(false);
+  if (!isOpen && dating) setDating(false);
 
   return (
     <div
@@ -211,6 +225,45 @@ function TxnRow({
                 className="w-full rounded-lg px-2 py-1.5 text-xs text-left"
                 style={{ border: `1px solid ${MUTED}`, color: INK, background: "#fff" }}
               />
+            ) : dating ? (
+              <div className="text-left">
+                <label className="mb-1.5 block text-[11px]" style={{ color: MUTED }} htmlFor={`txn-date-${t.id}`}>
+                  Counts in the month of this date
+                </label>
+                <input
+                  id={`txn-date-${t.id}`}
+                  type="date"
+                  autoFocus
+                  value={dateDraft}
+                  max={localMonthEnd()}
+                  onChange={(e) => setDateDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveDate(dateDraft);
+                    if (e.key === "Escape") { e.stopPropagation(); setDating(false); }
+                  }}
+                  className="w-full rounded-lg px-2 py-1.5 text-xs"
+                  style={{ border: `1px solid ${MUTED}`, color: INK, background: CARD }}
+                />
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-full py-1.5 text-xs font-semibold"
+                  style={{
+                    background: INK, color: CARD,
+                    cursor: dateDraft && dateDraft !== t.date ? "pointer" : "default",
+                    opacity: dateDraft && dateDraft !== t.date ? 1 : 0.5,
+                  }}
+                  disabled={!dateDraft || dateDraft === t.date}
+                  onClick={() => saveDate(dateDraft)}
+                >
+                  Save
+                </button>
+                {t.bankDate && (
+                  <button type="button" style={MENU_ITEM} {...menuItemHover} className="mt-1"
+                          onClick={() => saveDate(t.bankDate!)}>
+                    Reset to bank date ({t.bankDate.slice(5)})
+                  </button>
+                )}
+              </div>
             ) : (
               /* stacked full-width rows with the Export menu's SOFT row
                  hover — the app's one popover standard (Alena, 2026-07-29) */
@@ -229,6 +282,20 @@ function TxnRow({
                     <span>Category</span>
                     <span className="flex min-w-0 items-center gap-0.5" style={{ color: MUTED }}>
                       <span className="truncate">{areaLabel(area, rowLabel)}</span>
+                      <ChevronRight size={13} aria-hidden className="shrink-0" />
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  style={MENU_ITEM}
+                  {...menuItemHover}
+                  onClick={() => { setDateDraft(t.date); setDating(true); }}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Month</span>
+                    <span className="flex min-w-0 items-center gap-0.5" style={{ color: MUTED }}>
+                      <span className="truncate">{monthLabel(t.date.slice(0, 7))}</span>
                       <ChevronRight size={13} aria-hidden className="shrink-0" />
                     </span>
                   </span>
@@ -281,7 +348,7 @@ function rowIcon(label: string, area: CashflowArea): LucideIcon {
 
 function Row({
   row, total, open, onToggle, valueColor, area,
-  openTxnMenu, onToggleTxnMenu, onCloseTxnMenu, onOpenPicker, onRenameTxn,
+  openTxnMenu, onToggleTxnMenu, onCloseTxnMenu, onOpenPicker, onRenameTxn, onSetTxnDate,
   onEdit,
 }: {
   row: CashflowRow; total: number; open: boolean; onToggle: () => void; valueColor: string;
@@ -291,6 +358,7 @@ function Row({
   onCloseTxnMenu: () => void;
   onOpenPicker: (target: PickerTarget) => void;
   onRenameTxn: (id: number, label: string) => void;
+  onSetTxnDate: (id: number, date: string) => void;
   /** edit mode: clicking the row opens the category modal instead of drilling */
   onEdit?: () => void;
 }) {
@@ -368,6 +436,7 @@ function Row({
               onClose={onCloseTxnMenu}
               onOpenPicker={() => onOpenPicker({ id: t.id, area, rowLabel: row.label, txnLabel: t.label })}
               onRename={(label) => onRenameTxn(t.id, label)}
+              onSetDate={(date) => onSetTxnDate(t.id, date)}
             />
           ))}
           {area === "expense" && (
@@ -385,9 +454,6 @@ function Row({
 // own modal, opened from the row popover's category pill. Destinations are
 // grouped under uppercase micro-labels — Income · Needs · Wants · Savings ·
 // Other (Transfer) · Disputed — the current location's chip is omitted.
-// Last section moves it across months instead (Alena 2026-11-14): one step
-// back or forward from the month on screen, never into the future.
-// `month` is the viewed month — where the transaction is filed right now.
 export interface PickerTarget {
   id: number;
   area: CashflowArea;
@@ -396,10 +462,9 @@ export interface PickerTarget {
 }
 
 function TxnPickerModal({
-  target, month, categories, onTxnAction, onClose,
+  target, categories, onTxnAction, onClose,
 }: {
   target: PickerTarget;
-  month: string;
   categories: { id: number; name: string; grp: "need" | "want" }[];
   onTxnAction: OnTxnAction;
   onClose: () => void;
@@ -424,13 +489,6 @@ function TxnPickerModal({
   };
   const cats = (grp: "need" | "want") =>
     categories.filter((c) => c.grp === grp && !(isExpense && c.name === target.rowLabel));
-  const pickMonth = (to: string) => {
-    onClose();
-    onTxnAction(target.id, "month", { month: to });
-  };
-  // same UTC month key the server compares against
-  const monthChoices = [shiftMonth(month, -1), shiftMonth(month, 1)]
-    .filter((m) => m <= new Date().toISOString().slice(0, 7));
 
   const section = (label: string, chips: React.ReactNode) => (
     <div className="mb-3">
@@ -469,7 +527,6 @@ function TxnPickerModal({
         {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
         {target.area !== "transfer" && section("Other", destChip("Transfer", () => pickArea("transfer")))}
         {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
-        {section("Month", monthChoices.map((m) => destChip(monthLabel(m), () => pickMonth(m))))}
       </div>
     </div>
   );
@@ -759,6 +816,8 @@ export default function BudgetView({
   const [gatedTxnCount, setGatedTxnCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // why the last date edit was refused, if it was — shown under the header
+  const [txnError, setTxnError] = useState<string | null>(null);
   // Expenses-card edit mode (spec Alena 2026-07-28): in edit mode a category
   // row opens the category modal, where rename and delete live.
   const [editing, setEditing] = useState(false);
@@ -789,6 +848,7 @@ export default function BudgetView({
     setPicker(null);
     setGatedTxnCount(0);
     setSyncError(null);
+    setTxnError(null);
     setEditing(false);
     setEditCat(null);
     setEditingSavings(false);
@@ -858,9 +918,7 @@ export default function BudgetView({
       const body =
         action === "category"
           ? { id, action, categoryId: opts?.categoryId }
-          : action === "month"
-            ? { id, action, month: opts?.month }
-            : { id, action, to: opts?.to, categoryId: opts?.categoryId };
+          : { id, action, to: opts?.to, categoryId: opts?.categoryId };
       const res = await fetch("/api/transactions", {
         method: "PUT",
         credentials: "same-origin",
@@ -986,6 +1044,30 @@ export default function BudgetView({
     [onLocked, loadMonth],
   );
 
+  // Re-date a transaction (the ⋯ menu's Month row). The server can refuse —
+  // an unsynced or imported month — and that reason has to reach the user,
+  // or the edit would just seem to do nothing.
+  const onSetTxnDate = useCallback(
+    async (id: number, date: string) => {
+      setOpenTxnMenu(null);
+      setTxnError(null);
+      const res = await fetch("/api/transactions", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "date", date }),
+      });
+      if (res.status === 401) { onLocked(); return; }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setTxnError(typeof body.error === "string" ? body.error : "Couldn't change the date");
+        return;
+      }
+      await loadMonth();
+    },
+    [onLocked, loadMonth],
+  );
+
   useEffect(() => {
     if (!plusOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -1085,6 +1167,15 @@ export default function BudgetView({
     <div>
       {header}
 
+      {txnError && (
+        <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-xs"
+             style={{ background: SOFT, color: INK }}>
+          <span>{txnError}</span>
+          <button type="button" aria-label="Dismiss" style={{ color: MUTED, cursor: "pointer" }}
+                  onClick={() => setTxnError(null)}><X size={14} /></button>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-col gap-3 sm:flex-row">
         <Tile label="Income" value={usd(data.totalIncome)} color={GOOD} />
         <Tile label="Expenses" value={usd(data.totalExpenses)} color={BAD} />
@@ -1114,7 +1205,7 @@ export default function BudgetView({
                open={openRow === `i:${row.label}`}
                onToggle={() => setOpenRow(openRow === `i:${row.label}` ? null : `i:${row.label}`)}
                openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
         ))}
       </div>
 
@@ -1149,7 +1240,7 @@ export default function BudgetView({
                      open={openRow === `e:${row.label}`}
                      onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
                      openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
+                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate}
                      onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
               );
             })}
@@ -1165,7 +1256,7 @@ export default function BudgetView({
                      open={openRow === `e:${row.label}`}
                      onToggle={() => setOpenRow(openRow === `e:${row.label}` ? null : `e:${row.label}`)}
                      openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
+                     onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate}
                      onEdit={editing && cat ? () => { setModalError(null); setEditCat(cat); } : undefined} />
               );
             })}
@@ -1179,19 +1270,20 @@ export default function BudgetView({
                  open={openRow === "d:Disputed"}
                  onToggle={() => setOpenRow(openRow === "d:Disputed" ? null : "d:Disputed")}
                  openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
           </div>
         )}
-        {/* Transfer folder — own-account moves the classifier took for
-            income or spending; visible so they can be moved back, counted
-            in no total (Alena 2026-11-14) */}
+        {/* Transfer folder — everything set aside as a transfer: the
+            classifier's own (card payments, own-account moves, ATM/cash
+            withdrawals) plus the user's moves. Visible so each can be
+            re-filed, counted in no total (Alena 2026-11-14) */}
         {data.transfers && (
           <div className={needsRows.length > 0 || wantsRows.length > 0 || data.disputed ? "mt-4" : "mt-0"}>
             <Row row={data.transfers} total={data.totalExpenses} valueColor={MUTED} area="transfer"
                  open={openRow === "t:Transfer"}
                  onToggle={() => setOpenRow(openRow === "t:Transfer" ? null : "t:Transfer")}
                  openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} />
+                 onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate} />
           </div>
         )}
       </div>
@@ -1236,7 +1328,7 @@ export default function BudgetView({
                open={openRow === `s:${row.label}`}
                onToggle={() => setOpenRow(openRow === `s:${row.label}` ? null : `s:${row.label}`)}
                openTxnMenu={openTxnMenu} onToggleTxnMenu={onToggleTxnMenu} onCloseTxnMenu={onCloseTxnMenu}
-               onOpenPicker={setPicker} onRenameTxn={onRenameTxn}
+               onOpenPicker={setPicker} onRenameTxn={onRenameTxn} onSetTxnDate={onSetTxnDate}
                onEdit={editingSavings ? () => setEditSaved(row) : undefined} />
         ))}
       </div>
@@ -1257,7 +1349,6 @@ export default function BudgetView({
         <TxnPickerModal
           key={picker.id}
           target={picker}
-          month={data.month}
           categories={data.categories}
           onTxnAction={onTxnAction}
           onClose={() => setPicker(null)}

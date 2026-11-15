@@ -12,7 +12,7 @@ function makeDb(): Database.Database {
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, plaid_txn_id TEXT UNIQUE,
       date TEXT, name TEXT, merchant TEXT, amount REAL, category_id INTEGER,
-      pending INTEGER DEFAULT 0, txn_class TEXT, pfc TEXT, cashflow_month TEXT
+      pending INTEGER DEFAULT 0, txn_class TEXT, pfc TEXT, date_override TEXT
     );
     CREATE TABLE accounts (id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT, kind TEXT, institution TEXT, cashflow_role TEXT);
   `);

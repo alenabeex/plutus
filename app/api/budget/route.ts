@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { monthLabel, isValidMonthKey } from "@/lib/format";
-import { cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions, TXN_MONTH_SQL } from "@/lib/derive";
+import {
+  cashflowView, classifyTransactions, categorizeTransactions, ensureMonthsFromTransactions,
+  monthShowsDerived, TXN_MONTH_SQL,
+} from "@/lib/derive";
 import type { CashflowData, CashflowRow } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -45,9 +48,13 @@ function buildCashflowData(month: string): CashflowData {
     .all() as { id: number; name: string; grp: "need" | "want" }[];
   const base = { month, monthLabel: monthLabel(month), months, categories, txnMonthMin: txnMonthMin(d) };
 
-  if (row.source !== "sheet") {
-    const v = cashflowView(month, d);
-    if (v.txnCount > 0) {
+  // Sheet months predate transaction data. Every other month is read live:
+  // either the whole view derives, or — for a month still showing stored
+  // numbers — at least its Transfer / Disputed folders do, so a row filed
+  // there is never unreachable.
+  const v = row.source !== "sheet" ? cashflowView(month, d) : null;
+  if (v) {
+    if (monthShowsDerived(v, row)) {
       return {
         ...base, source: "derived",
         income: v.income, totalIncome: v.totalIncome,
@@ -79,8 +86,8 @@ function buildCashflowData(month: string): CashflowData {
     expenses, totalExpenses,
     totalNeeds: row.total_fixed, totalWants: row.total_variable,
     saved: round2(row.total_income - totalExpenses),
-    // sheet months predate transaction data — nothing to itemize
-    savedRows: [], totalSaved: 0, disputed: null, transfers: null,
+    // stored months itemize nothing but the two folders (see above)
+    savedRows: [], totalSaved: 0, disputed: v?.disputed ?? null, transfers: v?.transfers ?? null,
   };
 }
 
