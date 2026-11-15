@@ -7,7 +7,7 @@ function makeDb(): Database.Database {
   d.exec(`
     CREATE TABLE categories (
       id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
-      sort INTEGER DEFAULT 0, grp TEXT
+      sort INTEGER DEFAULT 0, grp TEXT, icon TEXT
     );
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, date TEXT, name TEXT, merchant TEXT,

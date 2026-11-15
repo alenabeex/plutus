@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import type { CategoryGroup } from "./types";
+import { isCategoryIconKey } from "./category-icons";
 
 // Category list edits (Alena 2026-11-14): the Expenses card's Edit opens a
-// list of every category, where categories are added, renamed and deleted
-// on the fly. This file is the tested seam for those writes and for the
+// list of every category, where categories are added, renamed, given an
+// icon and deleted on the fly. This file is the tested seam for those writes and for the
 // default-category seeding they must coexist with. No `db` import: every
 // function takes the connection, so lib/db can call seedDefaultCategories
 // during its own migrate() without a cycle.
@@ -42,6 +43,30 @@ export function addCategory(d: Database.Database, input: { name: unknown; grp: u
 export function renameCategory(d: Database.Database, id: number, rawName: unknown): void {
   if (!d.prepare(`SELECT id FROM categories WHERE id = ?`).get(id)) throw new CategoryError("category not found");
   d.prepare(`UPDATE categories SET name = ? WHERE id = ?`).run(cleanName(d, rawName, id), id);
+}
+
+/** Set a category's icon to one of the CATEGORY_ICON_KEYS, or clear it
+ *  (null) so the row goes back to the keyword guess. */
+export function setCategoryIcon(d: Database.Database, id: number, icon: unknown): void {
+  if (icon !== null && !isCategoryIconKey(icon)) throw new CategoryError("Pick one of the listed icons");
+  const r = d.prepare(`UPDATE categories SET icon = ? WHERE id = ?`).run(icon, id);
+  if (r.changes === 0) throw new CategoryError("category not found");
+}
+
+/** The pencil's save: a new name, a new icon, or both — both land or
+ *  neither does (a refused icon must not leave a half-applied rename). */
+export function updateCategory(
+  d: Database.Database,
+  id: number,
+  patch: { name?: unknown; icon?: unknown },
+): void {
+  const hasName = "name" in patch;
+  const hasIcon = "icon" in patch;
+  if (!hasName && !hasIcon) throw new CategoryError("nothing to change");
+  d.transaction(() => {
+    if (hasName) renameCategory(d, id, patch.name);
+    if (hasIcon) setCategoryIcon(d, id, patch.icon);
+  })();
 }
 
 /** Delete. Non-destructive to the ledger — the category's transactions fall

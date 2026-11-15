@@ -166,6 +166,9 @@ function migrate(d: Database.Database) {
     (d.prepare(`PRAGMA table_info(categories)`).all() as { name: string }[]).map((c) => c.name),
   );
   if (!catCols.has("grp")) d.exec(`ALTER TABLE categories ADD COLUMN grp TEXT DEFAULT 'want'`);
+  // icon (2026-11-14): a lib/category-icons key the user picked; NULL = the
+  // keyword guess every category used before icons were editable.
+  if (!catCols.has("icon")) d.exec(`ALTER TABLE categories ADD COLUMN icon TEXT`);
   if (!acctCols.has("cashflow_role")) d.exec(`ALTER TABLE accounts ADD COLUMN cashflow_role TEXT`);
 
   // v3: manual assets carry an icon key (lib/asset-icons) so their rows read

@@ -495,7 +495,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
     `SELECT t.id, COALESCE(t.date_override, t.date) date,
             CASE WHEN t.date_override IS NOT NULL THEN t.date END bank_date,
             COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
-            t.amount, t.txn_class, c.name cat, c.grp,
+            t.amount, t.txn_class, c.name cat, c.grp, c.icon cat_icon,
             COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct, a.mask,
             a.kind, a.institution, a.name acct_name, a.cashflow_role
      FROM transactions t
@@ -507,7 +507,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   ).all(month) as {
     id: number; date: string; bank_date: string | null; label: string; amount: number;
     txn_class: "income" | "expense" | "saved" | "excluded" | "transfer_manual" | "transfer";
-    cat: string | null; grp: string | null;
+    cat: string | null; grp: string | null; cat_icon: string | null;
     acct: string | null; mask: string | null;
     kind: string | null; institution: string | null; acct_name: string | null; cashflow_role: string | null;
   }[];
@@ -579,7 +579,7 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
     } else {
       const key = r.cat ?? "Uncategorized";
       const grp: CategoryGroup = r.grp === "need" ? "need" : r.grp === "business" ? "business" : "want";
-      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp };
+      const row = expenseBy.get(key) ?? { label: key, value: 0, txns: [], grp, ...(r.cat_icon ? { icon: r.cat_icon } : {}) };
       row.value = round2(row.value + r.amount);
       row.txns.push(txn(round2(r.amount)));
       expenseBy.set(key, row);

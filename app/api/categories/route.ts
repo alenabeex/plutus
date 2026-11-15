@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { addCategory, renameCategory, deleteCategory, CategoryError } from "@/lib/category-ops";
+import { addCategory, updateCategory, deleteCategory, CategoryError } from "@/lib/category-ops";
 import { categorizeTransactions } from "@/lib/derive";
 import { aiCategorize } from "@/lib/ai-categorize";
 
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 // Category list edits (Alena 2026-11-14, superseding the 2026-07-28 per-row
 // edit mode): the Expenses card's Edit opens a list of every category, where
-// categories are added, renamed and deleted. Validation and the writes live
+// categories are added, renamed, given an icon and deleted. Validation and the writes live
 // in lib/category-ops.ts (the tested seam); only its CategoryError becomes a
 // 400 — anything else falls through to withJsonErrors' generic 500.
 
@@ -66,7 +66,9 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
 });
 
-// Rename — label-only, nothing recategorizes.
+// Edit one category: `name` renames it (label-only, nothing recategorizes),
+// `icon` sets or clears (null) its icon. Either or both; both land or
+// neither does.
 export const PATCH = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
   if (locked) return locked;
@@ -77,7 +79,11 @@ export const PATCH = withJsonErrors(async (req: NextRequest) => {
     return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
   }
   const id = body.id;
-  const r = guard(() => renameCategory(db(), id, body.name));
+  const patch = {
+    ...("name" in body ? { name: body.name } : {}),
+    ...("icon" in body ? { icon: body.icon } : {}),
+  };
+  const r = guard(() => updateCategory(db(), id, patch));
   if (r instanceof NextResponse) return r;
   return withRefreshedSession(req, { ok: true });
 });
