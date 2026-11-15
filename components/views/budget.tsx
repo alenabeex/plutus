@@ -145,7 +145,8 @@ function localMonthEnd(): string {
 // row instead of one for the whole view). Three rows: Rename · Category ·
 // Month (Alena 2026-11-14). Rename swaps the rows for an input; Category
 // opens the TxnPickerModal — destinations live in their own modal, grouped
-// Income / Needs / Wants / Savings / Other / Disputed, not inline here;
+// Income / Needs / Wants / Business / Savings / Other / Disputed, not inline
+// here;
 // Month swaps the rows for a date editor — the transaction counts as an
 // entry for whatever month that date falls in.
 function TxnRow({
