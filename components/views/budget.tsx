@@ -512,7 +512,7 @@ function TxnPickerModal({
         role="dialog"
         aria-modal="true"
         aria-label={`Move ${target.txnLabel}`}
-        className="w-[360px] rounded-2xl p-6"
+        className="flex max-h-[85vh] w-[360px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between gap-3">
@@ -524,12 +524,18 @@ function TxnPickerModal({
         <div className="mb-4 text-xs" style={{ color: MUTED }}>
           Currently in <b style={{ color: INK }}>{areaLabel(target.area, target.rowLabel)}</b> — move to:
         </div>
+        {/* The destinations scroll inside the modal. Without this a long
+            category list (or a short window) pushed the centered modal past
+            both screen edges and cut off its top — Income and the first
+            Needs chips — with no way to reach them (Alena 2026-11-14). */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
         {target.area !== "income" && section("Income", destChip("Income", () => pickArea("income")))}
         {cats("need").length > 0 && section("Needs", cats("need").map((c) => destChip(c.name, () => pickCategory(c))))}
         {cats("want").length > 0 && section("Wants", cats("want").map((c) => destChip(c.name, () => pickCategory(c))))}
         {target.area !== "saved" && section("Savings", destChip("Savings", () => pickArea("saved")))}
         {target.area !== "transfer" && section("Other", destChip("Transfer", () => pickArea("transfer")))}
         {target.area !== "disputed" && section("Disputed", destChip("Disputed", () => pickArea("disputed"), BAD))}
+        </div>
       </div>
     </div>
   );
