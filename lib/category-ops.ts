@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import type { CategoryGroup } from "./types";
+import { isCategoryIconKey } from "./category-icons";
 
 // Category list edits (Alena 2026-11-14): the Expenses card's Edit opens a
 // list of every category, where categories are added, renamed and deleted
@@ -42,6 +43,14 @@ export function addCategory(d: Database.Database, input: { name: unknown; grp: u
 export function renameCategory(d: Database.Database, id: number, rawName: unknown): void {
   if (!d.prepare(`SELECT id FROM categories WHERE id = ?`).get(id)) throw new CategoryError("category not found");
   d.prepare(`UPDATE categories SET name = ? WHERE id = ?`).run(cleanName(d, rawName, id), id);
+}
+
+/** Set a category's icon to one of the CATEGORY_ICON_KEYS, or clear it
+ *  (null) so the row goes back to the keyword guess. */
+export function setCategoryIcon(d: Database.Database, id: number, icon: unknown): void {
+  if (icon !== null && !isCategoryIconKey(icon)) throw new CategoryError("Pick one of the listed icons");
+  const r = d.prepare(`UPDATE categories SET icon = ? WHERE id = ?`).run(icon, id);
+  if (r.changes === 0) throw new CategoryError("category not found");
 }
 
 /** Delete. Non-destructive to the ledger — the category's transactions fall

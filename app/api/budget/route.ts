@@ -44,8 +44,8 @@ function buildCashflowData(month: string): CashflowData {
     d.prepare(`SELECT month FROM budget_months ORDER BY month ASC`).all() as { month: string }[]
   ).map((r) => r.month);
   const categories = d
-    .prepare(`SELECT id, name, COALESCE(grp,'want') grp FROM categories ORDER BY sort ASC`)
-    .all() as { id: number; name: string; grp: CategoryGroup }[];
+    .prepare(`SELECT id, name, COALESCE(grp,'want') grp, icon FROM categories ORDER BY sort ASC`)
+    .all() as { id: number; name: string; grp: CategoryGroup; icon: string | null }[];
   const base = { month, monthLabel: monthLabel(month), months, categories, txnMonthMin: txnMonthMin(d) };
 
   // Sheet months predate transaction data. Every other month is read live:

@@ -13,6 +13,7 @@ import {
   ShoppingCart, Utensils, Ticket, Wrench, Home, PawPrint, Gift, Fuel,
   Plane, ShoppingBag, GraduationCap, Smartphone, Receipt, Zap, Wifi,
   Shield, HeartPulse, Building2, Bitcoin,
+  Coffee, Music, Car, Dumbbell, Baby, Briefcase, Heart,
   type LucideIcon,
 } from "lucide-react";
 import { MonthPicker } from "@/components/month-picker";
@@ -20,6 +21,9 @@ import { CARD, LINE, SOFT, MUTED, INK, GOOD, BAD } from "@/lib/colors";
 import { MENU_ITEM, menuItemHover } from "@/lib/styles";
 import { usd, gradeFor, monthLabel } from "@/lib/format";
 import type { CashflowData, CashflowRow, CashflowTxn, CategoryGroup } from "@/lib/types";
+import {
+  CATEGORY_ICON_KEYS, CATEGORY_ICON_LABELS, guessCategoryIcon, isCategoryIconKey, type CategoryIconKey,
+} from "@/lib/category-icons";
 
 interface BudgetViewProps {
   month: string;
@@ -331,39 +335,37 @@ function TxnRow({
 }
 
 // Row icon — a real glyph in the Net Worth-style avatar circle (T8.1: Net
-// Worth is the view template every view matches). Keyword-matched so renamed
+// Worth is the view template every view matches). A category shows the icon
+// its owner picked (categories.icon, edited in the categories modal); with
+// none picked, the label is keyword-matched (lib/category-icons) so renamed
 // or custom categories still land on something sensible; Tag is the fallback.
-const ICON_RULES: [RegExp, LucideIcon][] = [
-  [/rent|housing|mortgage|apartment/i, Building2],
-  [/utilit|electric|power/i, Zap],
-  [/phone|internet|wifi/i, Wifi],
-  [/insurance/i, Shield],
-  [/medical|health|doctor|dental/i, HeartPulse],
-  [/app|subs/i, Smartphone],
-  [/grocer/i, ShoppingCart],
-  [/eat|restaurant|dining|food/i, Utensils],
-  [/event|ent\b|entertain/i, Ticket],
-  [/mainten|repair/i, Wrench],
-  [/gas|fuel/i, Fuel],
-  [/pet/i, PawPrint],
-  [/gift/i, Gift],
-  [/travel|parking|flight|hotel/i, Plane],
-  [/shop|personal/i, ShoppingBag],
-  [/education|training|course|school/i, GraduationCap],
-  [/interest|fee|violation/i, Receipt],
-  [/crypto|coin|bitcoin/i, Bitcoin],
-  [/home|house|misc|maint/i, Home],
-  [/uncategorized/i, HelpCircle],
-];
+const CATEGORY_ICON_GLYPHS: Record<CategoryIconKey, LucideIcon> = {
+  housing: Building2, utilities: Zap, internet: Wifi, insurance: Shield,
+  health: HeartPulse, apps: Smartphone, groceries: ShoppingCart,
+  dining: Utensils, coffee: Coffee, events: Ticket, music: Music,
+  repair: Wrench, car: Car, fuel: Fuel, pets: PawPrint, gifts: Gift,
+  travel: Plane, shopping: ShoppingBag, education: GraduationCap,
+  fees: Receipt, home: Home, fitness: Dumbbell, kids: Baby,
+  business: Briefcase, crypto: Bitcoin, heart: Heart, tag: Tag,
+};
 
-function rowIcon(label: string, area: CashflowArea): LucideIcon {
+/** The icon key a category shows: its chosen one, else the keyword guess,
+ *  else the plain tag. */
+function categoryIconKey(name: string, chosen?: string | null): CategoryIconKey {
+  return isCategoryIconKey(chosen) ? chosen : guessCategoryIcon(name) ?? "tag";
+}
+
+function rowIcon(label: string, area: CashflowArea, chosen?: string | null): LucideIcon {
   if (area === "income") return Banknote;
   if (area === "disputed") return Flag;
   if (area === "transfer") return ArrowLeftRight;
-  const matched = ICON_RULES.find(([re]) => re.test(label))?.[1];
+  if (area === "expense" && label === "Uncategorized") return HelpCircle;
   // saved destinations keyword-match too (Crypto → Bitcoin), piggy bank otherwise
-  if (area === "saved") return matched ?? PiggyBank;
-  return matched ?? Tag;
+  if (area === "saved") {
+    const guess = guessCategoryIcon(label);
+    return guess ? CATEGORY_ICON_GLYPHS[guess] : PiggyBank;
+  }
+  return CATEGORY_ICON_GLYPHS[categoryIconKey(label, chosen)];
 }
 
 function Row({
@@ -391,7 +393,7 @@ function Row({
   // rowIcon returns one of a fixed set of static lucide components, so this
   // is a lookup, not a component created during render — createElement keeps
   // the react-hooks/static-components lint honest about that.
-  const icon = createElement(rowIcon(row.label, area), { size: 17 });
+  const icon = createElement(rowIcon(row.label, area, row.icon), { size: 17 });
   const clickable = !!onEdit || drillable;
   return (
     <div>
@@ -573,29 +575,100 @@ function TxnPickerModal({
   );
 }
 
-// Categories modal (Alena 2026-11-14, superseding the 2026-07-28 per-row
-// edit mode and its pencils): the Expenses card's Edit opens the whole
-// category list — every category, including ones with no spending this
-// month, which the card itself never shows. Add at the bottom, click a name
-// to rename, delete is two-step. Standard modal manners: backdrop click and
-// Escape close. The list is the server's (`categories` re-fetches after
-// every change), so what is on screen is what is saved.
-type Cat = { id: number; name: string; grp: CategoryGroup };
+// Edit Categories modal (Alena 2026-11-14, superseding the 2026-07-28
+// per-row edit mode): the Expenses card's Edit opens the whole category
+// list — every category, including ones with no spending this month, which
+// the card itself never shows. Each row has a pencil (name + icon editor,
+// opens under the row) and a two-step Delete; Add is at the bottom.
+// Standard modal manners: backdrop click and Escape close. The list is the
+// server's (`categories` re-fetches after every change), so what is on
+// screen is what is saved.
+type Cat = { id: number; name: string; grp: CategoryGroup; icon: string | null };
+
+// The pencil's editor for one category: its name and its icon, saved
+// together. Only what changed is sent.
+function CategoryEditor({
+  cat, busy, onSave, onCancel,
+}: {
+  cat: Cat;
+  busy: boolean;
+  onSave: (patch: { name?: string; icon?: string }) => void;
+  onCancel: () => void;
+}) {
+  const shown = categoryIconKey(cat.name, cat.icon);
+  const [name, setName] = useState(cat.name);
+  const [icon, setIcon] = useState<CategoryIconKey>(shown);
+  const trimmed = name.trim();
+  const nameChanged = trimmed.length > 0 && trimmed !== cat.name;
+  const iconChanged = icon !== shown;
+  const dirty = nameChanged || iconChanged;
+  const save = () => {
+    if (!dirty || busy || trimmed.length === 0) return;
+    onSave({ ...(nameChanged ? { name: trimmed } : {}), ...(iconChanged ? { icon } : {}) });
+  };
+  return (
+    <div className="mx-2 mb-2 rounded-xl p-3" style={{ border: `1px solid ${LINE}` }}>
+      <input
+        type="text"
+        autoFocus
+        value={name}
+        maxLength={40}
+        aria-label={`Name for ${cat.name}`}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
+        }}
+        className="w-full rounded-lg px-2 py-1.5 text-[13px]"
+        style={{ border: `1px solid ${LINE}`, color: INK, background: CARD }}
+      />
+      <div className="mb-1.5 mt-3 text-[11px]" style={{ color: MUTED, fontWeight: 600 }}>Icon</div>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Icon for ${cat.name}`}>
+        {CATEGORY_ICON_KEYS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            aria-label={CATEGORY_ICON_LABELS[k]}
+            aria-pressed={icon === k}
+            title={CATEGORY_ICON_LABELS[k]}
+            className="flex items-center justify-center"
+            style={{
+              width: 32, height: 32, borderRadius: "50%", cursor: "pointer",
+              background: icon === k ? INK : SOFT, color: icon === k ? CARD : MUTED,
+            }}
+            onClick={() => setIcon(k)}
+          >
+            {createElement(CATEGORY_ICON_GLYPHS[k], { size: 15 })}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" className="rounded-full px-3 py-1 text-xs"
+                style={{ border: `1px solid ${LINE}`, color: MUTED, cursor: "pointer" }}
+                onClick={onCancel}>Cancel</button>
+        <button type="button" className="rounded-full px-3 py-1 text-xs font-semibold"
+                style={{ background: INK, color: CARD, cursor: dirty && !busy ? "pointer" : "default", opacity: dirty && !busy ? 1 : 0.5 }}
+                disabled={!dirty || busy}
+                onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
 
 function CategoriesModal({
-  categories, busy, error, onAdd, onRename, onDelete, onClose,
+  categories, busy, error, onAdd, onEdit, onDelete, onClose,
 }: {
   categories: Cat[];
   busy: boolean;
   error: string | null;
   onAdd: (name: string, grp: CategoryGroup) => Promise<boolean>;
-  onRename: (id: number, name: string) => void;
+  onEdit: (id: number, patch: { name?: string; icon?: string }) => Promise<boolean>;
   onDelete: (id: number) => void;
   onClose: () => void;
 }) {
   const [newName, setNewName] = useState("");
   const [newGrp, setNewGrp] = useState<CategoryGroup>("want");
-  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [armedId, setArmedId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -612,53 +685,59 @@ function CategoriesModal({
   };
 
   const catRow = (c: Cat) => (
-    <div key={c.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-         onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
-         onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}>
-      {renamingId === c.id ? (
-        <input
-          type="text"
-          autoFocus
-          defaultValue={c.name}
-          maxLength={40}
-          aria-label={`Rename ${c.name}`}
-          onBlur={() => setRenamingId(null)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              const v = (e.target as HTMLInputElement).value.trim();
-              setRenamingId(null);
-              if (v && v !== c.name) onRename(c.id, v);
-            }
-            if (e.key === "Escape") { e.stopPropagation(); setRenamingId(null); }
+    <div key={c.id}>
+      <div className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = SOFT)}
+           onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}>
+        <span className="flex shrink-0 items-center justify-center" aria-hidden
+              style={{ width: 26, height: 26, borderRadius: "50%", background: SOFT, color: MUTED }}>
+          {createElement(CATEGORY_ICON_GLYPHS[categoryIconKey(c.name, c.icon)], { size: 13 })}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: INK }}>{c.name}</span>
+        <button
+          type="button"
+          className="flex shrink-0 items-center justify-center rounded-full"
+          style={{
+            width: 26, height: 26, border: `1px solid ${editingId === c.id ? INK : LINE}`,
+            color: editingId === c.id ? INK : MUTED, cursor: "pointer",
+            background: editingId === c.id ? CARD : "transparent",
           }}
-          className="min-w-0 flex-1 rounded-lg px-2 py-1 text-[13px]"
-          style={{ border: `1px solid ${MUTED}`, color: INK, background: CARD }}
-        />
-      ) : (
-        <button type="button" className="min-w-0 flex-1 truncate text-left text-[13px]"
-                style={{ color: INK, cursor: "pointer" }} title="Rename"
-                onClick={() => { setArmedId(null); setRenamingId(c.id); }}>
-          {c.name}
+          aria-label={`Edit ${c.name}`}
+          aria-expanded={editingId === c.id}
+          title="Edit name and icon"
+          onClick={() => { setArmedId(null); setEditingId(editingId === c.id ? null : c.id); }}
+        >
+          <Pencil size={12} aria-hidden />
         </button>
+        <button
+          type="button"
+          className="shrink-0 rounded-full px-2.5 py-1 text-xs"
+          style={{
+            border: `1px solid ${LINE}`, cursor: busy ? "default" : "pointer",
+            color: armedId === c.id ? INK : MUTED, fontWeight: armedId === c.id ? 600 : 400,
+            background: armedId === c.id ? CARD : "transparent",
+          }}
+          disabled={busy}
+          aria-label={armedId === c.id ? `Confirm delete ${c.name}` : `Delete ${c.name}`}
+          onBlur={() => setArmedId((v) => (v === c.id ? null : v))}
+          onClick={() => {
+            if (armedId === c.id) { setArmedId(null); setEditingId(null); onDelete(c.id); }
+            else setArmedId(c.id);
+          }}
+        >
+          {armedId === c.id ? "Really delete?" : "Delete"}
+        </button>
+      </div>
+      {editingId === c.id && (
+        <CategoryEditor
+          key={c.id}
+          cat={c}
+          busy={busy}
+          onCancel={() => setEditingId(null)}
+          // stays open when the server refuses (a name clash) so it can be fixed
+          onSave={async (patch) => { if (await onEdit(c.id, patch)) setEditingId(null); }}
+        />
       )}
-      <button
-        type="button"
-        className="shrink-0 rounded-full px-2.5 py-1 text-xs"
-        style={{
-          border: `1px solid ${LINE}`, cursor: busy ? "default" : "pointer",
-          color: armedId === c.id ? INK : MUTED, fontWeight: armedId === c.id ? 600 : 400,
-          background: armedId === c.id ? CARD : "transparent",
-        }}
-        disabled={busy}
-        aria-label={armedId === c.id ? `Confirm delete ${c.name}` : `Delete ${c.name}`}
-        onBlur={() => setArmedId((v) => (v === c.id ? null : v))}
-        onClick={() => {
-          if (armedId === c.id) { setArmedId(null); onDelete(c.id); }
-          else setArmedId(c.id);
-        }}
-      >
-        {armedId === c.id ? "Really delete?" : "Delete"}
-      </button>
     </div>
   );
 
@@ -700,18 +779,18 @@ function CategoriesModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Categories"
+        aria-label="Edit Categories"
         className="flex max-h-[85dvh] w-[380px] max-w-[calc(100vw-32px)] flex-col rounded-2xl p-6"
         style={{ background: CARD, boxShadow: "0 20px 60px rgba(16,17,20,.25)" }}
       >
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-[15px] font-bold" style={{ color: INK }}>Categories</h2>
+          <h2 className="text-[15px] font-bold" style={{ color: INK }}>Edit Categories</h2>
           <button type="button" aria-label="Close" style={{ color: MUTED, cursor: "pointer" }} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
         <div className="mb-4 text-xs" style={{ color: MUTED }}>
-          Click a name to rename it. Deleting a category sends its transactions to Uncategorized.
+          Use the pencil to change a name or icon. Deleting a category sends its transactions to Uncategorized.
         </div>
 
         <div className="-mx-2 min-h-0 flex-1 overflow-y-auto">
@@ -1543,7 +1622,7 @@ export default function BudgetView({
           error={modalError}
           onClose={() => void closeCats()}
           onAdd={(name, grp) => catCall("POST", { action: "add", name, grp })}
-          onRename={(id, name) => void catCall("PATCH", { id, name })}
+          onEdit={(id, patch) => catCall("PATCH", { id, ...patch })}
           onDelete={(id) => void catCall("DELETE", { id })}
         />
       )}

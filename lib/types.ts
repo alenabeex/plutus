@@ -61,6 +61,7 @@ export interface CashflowRow {
   value: number;
   txns: CashflowTxn[];    // empty for stored/sheet months → no drill-down
   grp?: CategoryGroup;    // expense rows only — income rows omit this key
+  icon?: string;          // expense rows whose category has a chosen icon (lib/category-icons key)
 }
 
 export interface CashflowData {
@@ -80,6 +81,6 @@ export interface CashflowData {
   totalSaved: number;       // sum of savedRows (≠ `saved`, the leftover)
   disputed: CashflowRow | null; // txn_class='excluded' — the Disputed folder at the bottom of Expenses
   transfers: CashflowRow | null; // txn_class 'transfer_manual' + benched 'transfer' — the Transfer folder under Disputed
-  categories: { id: number; name: string; grp: CategoryGroup }[]; // drill-down recategorize chips
+  categories: { id: number; name: string; grp: CategoryGroup; icon: string | null }[]; // picker chips + the categories modal
   txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }

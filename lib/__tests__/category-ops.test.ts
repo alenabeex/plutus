@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import {
-  addCategory, renameCategory, deleteCategory, seedDefaultCategories, uncategorizeTxn, CategoryError,
+  addCategory, renameCategory, setCategoryIcon, deleteCategory, seedDefaultCategories, uncategorizeTxn, CategoryError,
 } from "../category-ops";
 import { categorizeTransactions, cashflowView } from "../derive";
+import { guessCategoryIcon, isCategoryIconKey, CATEGORY_ICON_KEYS, CATEGORY_ICON_LABELS } from "../category-icons";
 
 const DEFAULTS = ["Rent / Housing", "Insurance", "Groceries"];
 const NEEDS = ["Rent / Housing", "Insurance"];
@@ -12,7 +13,8 @@ function makeDb(): Database.Database {
   const d = new Database(":memory:");
   d.exec(`
     CREATE TABLE categories (
-      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, sort INTEGER DEFAULT 0, grp TEXT DEFAULT 'want'
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, sort INTEGER DEFAULT 0, grp TEXT DEFAULT 'want',
+      icon TEXT
     );
     CREATE TABLE category_rules (
       id INTEGER PRIMARY KEY, pattern TEXT NOT NULL, field TEXT DEFAULT 'merchant', category_id INTEGER
@@ -221,5 +223,61 @@ describe("uncategorizeTxn", () => {
 
   it("rejects an unknown transaction", () => {
     expect(() => uncategorizeTxn(d, 99)).toThrow(CategoryError);
+  });
+});
+
+// Editable icons (Alena 2026-11-14). NULL icon = the keyword guess.
+describe("category icons", () => {
+  let d: Database.Database;
+  beforeEach(() => { d = makeDb(); });
+  const iconOf = (name: string) =>
+    (d.prepare(`SELECT icon FROM categories WHERE name = ?`).get(name) as { icon: string | null }).icon;
+
+  it("stores a chosen icon, and the Cash Flow row carries it", () => {
+    const id = idOf(d, "Groceries");
+    setCategoryIcon(d, id, "coffee");
+    expect(iconOf("Groceries")).toBe("coffee");
+    d.prepare(`INSERT INTO transactions (date, name, amount, category_id, txn_class) VALUES ('2026-07-03', 'SAFEWAY', 80, ?, 'expense')`).run(id);
+    expect(cashflowView("2026-07", d).expenses[0].icon).toBe("coffee");
+  });
+
+  it("clears back to the keyword guess with null — the row then carries no icon", () => {
+    const id = idOf(d, "Groceries");
+    setCategoryIcon(d, id, "coffee");
+    setCategoryIcon(d, id, null);
+    expect(iconOf("Groceries")).toBeNull();
+    d.prepare(`INSERT INTO transactions (date, name, amount, category_id, txn_class) VALUES ('2026-07-03', 'SAFEWAY', 80, ?, 'expense')`).run(id);
+    expect(cashflowView("2026-07", d).expenses[0]).not.toHaveProperty("icon");
+  });
+
+  it("rejects an icon that is not in the list, and an unknown category", () => {
+    expect(() => setCategoryIcon(d, idOf(d, "Groceries"), "rocket")).toThrow(CategoryError);
+    expect(() => setCategoryIcon(d, idOf(d, "Groceries"), 7)).toThrow(CategoryError);
+    expect(() => setCategoryIcon(d, 999, "coffee")).toThrow(CategoryError);
+    expect(iconOf("Groceries")).toBeNull();
+  });
+
+  it("survives a rename and a restart's default seeding", () => {
+    const id = idOf(d, "Insurance");
+    setCategoryIcon(d, id, "car");
+    renameCategory(d, id, "Car Insurance");
+    seedDefaultCategories(d, DEFAULTS, NEEDS);
+    expect(iconOf("Car Insurance")).toBe("car");
+  });
+
+  it("guesses the same icons the built-in categories always had", () => {
+    expect(guessCategoryIcon("Rent / Housing")).toBe("housing");
+    expect(guessCategoryIcon("Car Mainten.")).toBe("repair");
+    expect(guessCategoryIcon("Car Gas")).toBe("fuel");
+    expect(guessCategoryIcon("Misc. / Maint / Home")).toBe("home");
+    expect(guessCategoryIcon("Car Payment")).toBe("car");
+    expect(guessCategoryIcon("Business Expense")).toBe("business");
+    expect(guessCategoryIcon("Zzz")).toBeNull();
+  });
+
+  it("has a label for every key", () => {
+    for (const k of CATEGORY_ICON_KEYS) expect(CATEGORY_ICON_LABELS[k]).toBeTruthy();
+    expect(isCategoryIconKey("tag")).toBe(true);
+    expect(isCategoryIconKey("uncategorized")).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUnlocked, withRefreshedSession, withJsonErrors } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { addCategory, renameCategory, deleteCategory, CategoryError } from "@/lib/category-ops";
+import { addCategory, renameCategory, setCategoryIcon, deleteCategory, CategoryError } from "@/lib/category-ops";
 import { categorizeTransactions } from "@/lib/derive";
 import { aiCategorize } from "@/lib/ai-categorize";
 
@@ -66,7 +66,9 @@ export const POST = withJsonErrors(async (req: NextRequest) => {
   return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
 });
 
-// Rename — label-only, nothing recategorizes.
+// Edit one category: `name` renames it (label-only, nothing recategorizes),
+// `icon` sets or clears (null) its icon. Either or both; both land or
+// neither does.
 export const PATCH = withJsonErrors(async (req: NextRequest) => {
   const locked = requireUnlocked(req);
   if (locked) return locked;
@@ -77,7 +79,14 @@ export const PATCH = withJsonErrors(async (req: NextRequest) => {
     return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
   }
   const id = body.id;
-  const r = guard(() => renameCategory(db(), id, body.name));
+  if (!("name" in body) && !("icon" in body)) {
+    return NextResponse.json({ ok: false, error: "nothing to change" }, { status: 400 });
+  }
+  const d = db();
+  const r = guard(() => d.transaction(() => {
+    if ("name" in body) renameCategory(d, id, body.name);
+    if ("icon" in body) setCategoryIcon(d, id, body.icon);
+  })());
   if (r instanceof NextResponse) return r;
   return withRefreshedSession(req, { ok: true });
 });

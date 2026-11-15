@@ -7,7 +7,7 @@ function makeDb(): Database.Database {
   const d = new Database(":memory:");
   d.exec(`
     CREATE TABLE categories (
-      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, sort INTEGER DEFAULT 0, grp TEXT
+      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, sort INTEGER DEFAULT 0, grp TEXT, icon TEXT
     );
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY, account_id INTEGER, plaid_txn_id TEXT UNIQUE,

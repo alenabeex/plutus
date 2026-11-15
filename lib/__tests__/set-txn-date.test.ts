@@ -6,7 +6,7 @@ import { cashflowView } from "../derive";
 function makeDb(): Database.Database {
   const d = new Database(":memory:");
   d.exec(`
-    CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT, sort INTEGER, grp TEXT);
+    CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT, sort INTEGER, grp TEXT, icon TEXT);
     CREATE TABLE accounts (
       id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT,
       kind TEXT, institution TEXT, cashflow_role TEXT
