@@ -453,7 +453,7 @@ export interface DerivedCashflowView {
   savedRows: CashflowRow[];  // txn_class='saved' — income that became investments
   totalSaved: number;
   disputed: CashflowRow | null; // txn_class='excluded', one folder — visible, never counted
-  transfers: CashflowRow | null; // txn_class='transfer_manual', one folder — visible, never counted
+  transfers: CashflowRow | null; // txn_class 'transfer_manual' + 'transfer' (cash/card accounts) — one folder, visible, never counted
   txnCount: number;
 }
 
@@ -467,17 +467,20 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   const rows = d.prepare(
     `SELECT t.id, t.date, COALESCE(NULLIF(TRIM(t.merchant), ''), t.name, '?') label,
             t.amount, t.txn_class, c.name cat, c.grp,
-            COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct, a.mask
+            COALESCE(NULLIF(TRIM(a.nickname), ''), a.name) acct, a.mask,
+            a.kind, a.institution, a.name acct_name, a.cashflow_role
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      LEFT JOIN accounts a ON a.id = t.account_id
      WHERE t.pending = 0 AND COALESCE(t.cashflow_month, substr(t.date, 1, 7)) = ?
-       AND t.txn_class IN ('income', 'expense', 'saved', 'excluded', 'transfer_manual')
+       AND t.txn_class IN ('income', 'expense', 'saved', 'excluded', 'transfer_manual', 'transfer')
      ORDER BY t.date DESC, t.id DESC`,
   ).all(month) as {
     id: number; date: string; label: string; amount: number;
-    txn_class: "income" | "expense" | "saved" | "excluded" | "transfer_manual"; cat: string | null; grp: string | null;
+    txn_class: "income" | "expense" | "saved" | "excluded" | "transfer_manual" | "transfer";
+    cat: string | null; grp: string | null;
     acct: string | null; mask: string | null;
+    kind: string | null; institution: string | null; acct_name: string | null; cashflow_role: string | null;
   }[];
 
   const incomeBy = new Map<string, CashflowRow>();
@@ -487,10 +490,16 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
   // Expenses so negated charges stay auditable, but never in any total.
   const disputedTxns: CashflowRow["txns"] = [];
   let disputedTotal = 0;
-  // Manual transfers (Alena 2026-11-14) get the same treatment: one folder
-  // under Disputed, in no total. Stored as 'transfer_manual' — NOT the
-  // classifier's 'transfer' — so classifyTransactions' legacy upgrade passes,
-  // which re-decide 'transfer' rows by fingerprint, can never undo the user.
+  // Transfers (Alena 2026-11-14) get the same treatment: one folder under
+  // Disputed, in no total. It holds both the user's own moves and everything
+  // the classifier benched — card payments, own-account moves, and ATM/cash
+  // withdrawals (Plaid: TRANSFER_OUT_WITHDRAWAL) — so every settled
+  // transaction on a cash or card account is visible somewhere and can be
+  // re-filed. Investment/manual accounts (role "exclude") stay out: their
+  // buys, sells and dividends are not cash flow. A user's move is stored as
+  // 'transfer_manual' — NOT the classifier's 'transfer' — so
+  // classifyTransactions' legacy upgrade passes, which re-decide 'transfer'
+  // rows by fingerprint, can never undo the user.
   // Money moved between own accounts has no direction: absolute dollars.
   const transferTxns: CashflowRow["txns"] = [];
   let transferTotal = 0;
@@ -505,7 +514,10 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       disputedTotal = round2(disputedTotal + r.amount);
       continue;
     }
-    if (r.txn_class === "transfer_manual") {
+    if (r.txn_class === "transfer" && r.kind !== null && roleFor({
+      kind: r.kind, institution: r.institution, name: r.acct_name ?? "", cashflow_role: r.cashflow_role,
+    }) === "exclude") continue;
+    if (r.txn_class === "transfer_manual" || r.txn_class === "transfer") {
       const v = round2(Math.abs(r.amount));
       transferTxns.push({ id: r.id, date: r.date, label: r.label, value: v, account });
       transferTotal = round2(transferTotal + v);
@@ -554,7 +566,8 @@ export function cashflowView(month: string, d: Database.Database = db()): Derive
       : null,
     // active classes only — disputed/transfers must not make an otherwise-
     // empty month look like it has cash flow
-    txnCount: rows.length - disputedTxns.length - transferTxns.length,
+    txnCount: [...incomeBy.values(), ...expenseBy.values(), ...savedBy.values()]
+      .reduce((n, r) => n + r.txns.length, 0),
   };
 }
 

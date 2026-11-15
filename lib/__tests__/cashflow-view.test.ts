@@ -20,7 +20,8 @@ function makeDb(): Database.Database {
     -- every join resolves to NULL — matches none of the existing assertions,
     -- this table just needs to exist so the query itself doesn't error.
     CREATE TABLE accounts (
-      id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT
+      id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT,
+      kind TEXT, institution TEXT, cashflow_role TEXT
     );
   `);
   const cat = d.prepare(`INSERT INTO categories (name, sort, grp) VALUES (?, ?, ?)`);
@@ -34,11 +35,12 @@ function makeDb(): Database.Database {
 function txn(d: Database.Database, t: {
   date: string; name: string; merchant?: string; amount: number;
   category_id?: number; pending?: number; txn_class?: string; cashflow_month?: string;
+  account_id?: number;
 }) {
   d.prepare(
-    `INSERT INTO transactions (date, name, merchant, amount, category_id, pending, txn_class, cashflow_month)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(t.date, t.name, t.merchant ?? null, t.amount, t.category_id ?? null,
+    `INSERT INTO transactions (account_id, date, name, merchant, amount, category_id, pending, txn_class, cashflow_month)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(t.account_id ?? null, t.date, t.name, t.merchant ?? null, t.amount, t.category_id ?? null,
         t.pending ?? 0, t.txn_class ?? "expense", t.cashflow_month ?? null);
 }
 
@@ -131,8 +133,23 @@ describe("cashflowView", () => {
     expect(v.txnCount).toBe(0);
   });
 
-  it("leaves machine-classified transfers out entirely", () => {
-    txn(d, { date: "2026-07-03", name: "CARD PAYMENT", amount: 500, txn_class: "transfer" });
+  // Every settled transaction on a cash or card account must be visible
+  // somewhere (Alena 2026-11-14: "I don't see any withdrawals"). Plaid tags
+  // ATM withdrawals TRANSFER_OUT_WITHDRAWAL, so the classifier benches them
+  // as 'transfer' — they belong in the folder, where they can be re-filed.
+  it("lists machine-classified transfers from cash accounts in the folder", () => {
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (1, 'Everyday Checking', 'cash')`).run();
+    txn(d, { account_id: 1, date: "2026-07-03", name: "ATM WITHDRAWAL", amount: 60, txn_class: "transfer" });
+    const v = cashflowView("2026-07", d);
+    expect(v.transfers?.txns.map((t) => t.label)).toEqual(["ATM WITHDRAWAL"]);
+    expect(v.transfers?.value).toBe(60);
+    expect(v.totalExpenses).toBe(0);
+    expect(v.txnCount).toBe(0);
+  });
+
+  it("keeps investment-account activity out of the folder", () => {
+    d.prepare(`INSERT INTO accounts (id, name, kind) VALUES (2, 'Brokerage', 'investment')`).run();
+    txn(d, { account_id: 2, date: "2026-07-03", name: "BUY VTI", amount: 500, txn_class: "transfer" });
     expect(cashflowView("2026-07", d).transfers).toBeNull();
   });
 

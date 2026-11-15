@@ -14,7 +14,7 @@ function makeDb(): Database.Database {
       date TEXT, name TEXT, merchant TEXT, amount REAL, category_id INTEGER,
       pending INTEGER DEFAULT 0, txn_class TEXT, pfc TEXT, cashflow_month TEXT
     );
-    CREATE TABLE accounts (id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT);
+    CREATE TABLE accounts (id INTEGER PRIMARY KEY, nickname TEXT, name TEXT, mask TEXT, kind TEXT, institution TEXT, cashflow_role TEXT);
   `);
   d.prepare(`INSERT INTO categories (name, sort, grp) VALUES ('Groceries', 1, 'want')`).run();
   return d;

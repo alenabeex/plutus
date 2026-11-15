@@ -71,7 +71,7 @@ export interface CashflowData {
   savedRows: CashflowRow[]; // txn_class='saved' — income that became investments
   totalSaved: number;       // sum of savedRows (≠ `saved`, the leftover)
   disputed: CashflowRow | null; // txn_class='excluded' — the Disputed folder at the bottom of Expenses
-  transfers: CashflowRow | null; // txn_class='transfer_manual' — the Transfer folder under Disputed
+  transfers: CashflowRow | null; // txn_class 'transfer_manual' + benched 'transfer' — the Transfer folder under Disputed
   categories: { id: number; name: string; grp: "need" | "want" }[]; // drill-down recategorize chips
   txnMonthMin: string | null; // earliest settled-txn month — lets nav reach gated backfill months
 }
