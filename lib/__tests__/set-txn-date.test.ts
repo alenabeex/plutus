@@ -90,6 +90,14 @@ describe("setTxnDate", () => {
     expect(override(d)).toBeNull();
   });
 
+  // Sync creates the current month by copying last month's fixed bills
+  // forward, so its row has stored totals before anything has posted.
+  it("allows the current month even when its row carries copied-forward bills", () => {
+    d.prepare(`INSERT INTO budget_months (month, total_fixed) VALUES ('2026-11', 1900)`).run();
+    set(d, "2026-11-01");
+    expect(override(d)).toBe("2026-11-01");
+  });
+
   it("allows the reset even when the transaction's own month has since become unreachable", () => {
     set(d, "2026-08-01");
     d.prepare(`DELETE FROM budget_months WHERE month = '2026-07'`).run();

@@ -62,10 +62,13 @@ export function setTxnDate(
   } else if (target.source === "sheet") {
     // Sheet months render stored totals with no drill-down.
     throw new TxnDateError(`${monthLabel(month)} was imported from a sheet and can't take transactions`);
-  } else if (!storedMonthIsEmpty(target) && cashflowView(month, d).txnCount === 0) {
-    // A month still showing its stored numbers would flip to the live view
-    // with just this one row and hide them — the hazard the Add button
-    // already guards against.
+  } else if (month < nowMonth && !storedMonthIsEmpty(target) && cashflowView(month, d).txnCount === 0) {
+    // A past month still showing its stored numbers would flip to the live
+    // view with just this one row and hide them — the hazard the Add button
+    // already guards against. The current month is exempt: sync creates its
+    // row by copying last month's fixed bills forward (lib/budget-ops), so
+    // it carries a non-zero total_fixed before anything has posted, and it
+    // turns live on its own with the first transaction anyway.
     throw new TxnDateError(`${monthLabel(month)} shows saved totals and can't take transactions`);
   }
 
